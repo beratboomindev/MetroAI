@@ -34,7 +34,10 @@ KURALLAR:
 ARAÇLAR:
 {tools}
 
-Not: "şu şarkıyı çal" gibi isteklerde play_youtube, "araştır/ara" isteklerinde web_search kullan.
+Not:
+- "Spotify'dan/Spotify'da şu şarkıyı çal" gibi isteklerde play_spotify kullan.
+- "YouTube'dan çal" veya genel video isteklerinde play_youtube, "araştır/ara" isteklerinde web_search kullan.
+- Sisteme tam erişimin var: diğer araçların kapsamadığı her türlü dosya, klasör, paket, pencere veya sistem işleminde shell aracını kullan.
 """
 
 
@@ -125,6 +128,12 @@ class Agent:
             return tools.system_info({"what": "battery"}, self.ctx)
         if has("api bagla", "provider bagla", "api cek", "saglayici bagla", "modelleri cek"):
             return "Provider ve API bağlama menüsünü açıyorum. Metro Code penceresinden seçebilir veya /api yazabilirsin."
+        msp = re.match(
+            r"^(?:hey\s+metro\s+)?spotify(?:da|dan|'da|'dan)?\s+(.+?)\s+(?:sarkisini\s+|parcasini\s+)?(?:cal|ac|baslat|oynat)[\s!.,]*$",
+            t,
+        )
+        if msp:
+            return tools.play_spotify({"query": msp.group(1).strip()}, self.ctx)
         if re.fullmatch(r"(uyu|dinlen|kapan|gizlen|metro kapan)[\s!.,]*", t):
             self.ctx.sleep_minutes(15)
             return "Tamam, on beş dakika dinleniyorum. Beni tekrar çağırırsan buradayım."

@@ -202,12 +202,114 @@ def web_search(args: dict, ctx: Ctx) -> str:
     return f"{q} için arama açıldı."
 
 
-@tool("play_youtube", "YouTube'da video/müzik açar", {"query": "video veya şarkı adı"})
+@tool("close_app", "Çalışan bir uygulamayı kapatır", {"app": "kapatılacak uygulama adı, örn. spotify, firefox, discord"})
+def close_app(args: dict, ctx: Ctx) -> str:
+    raw = str(args.get("app", "")).strip()
+    if not raw:
+        return "Hangi uygulamayı kapatacağımı söylemedin."
+    key = _fold(raw)
+    candidates = APP_ALIASES.get(key, [raw.lower()])
+    for name in candidates:
+        rc, _ = _run(["pkill", "-f", name])
+        if rc == 0:
+            return f"{raw} kapatıldı."
+    return f"Açık bir {raw} uygulaması bulamadım."
+
+
+def _spotify_find_track(query: str) -> tuple[str | None, str]:
+    """API anahtarı gerektirmeden şarkının Spotify Track ID'sini ve başlığını bulur."""
+    import requests
+    import urllib.parse
+
+    headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"}
+    track_id: str | None = None
+    try:
+        r = requests.post(
+            "https://lite.duckduckgo.com/lite/",
+            data={"q": f"open.spotify.com/track {query}"},
+            headers=headers,
+            timeout=6,
+        )
+        txt = urllib.parse.unquote(r.text)
+        matches = re.findall(r"open\.spotify\.com/(?:intl-[a-z-]+/)?track/([A-Za-z0-9]{22})", txt)
+        if matches:
+            track_id = matches[0]
+    except Exception as e:
+        log_.debug("spotify arama hatası: %s", e)
+
+    if not track_id:
+        return None, query
+
+    title = query
+    try:
+        oe = requests.get(
+            f"https://open.spotify.com/oembed?url=https://open.spotify.com/track/{track_id}",
+            timeout=4,
+        ).json()
+        if oe.get("title"):
+            title = oe["title"]
+    except Exception:
+        pass
+    return track_id, title
+
+
+def _spotify_dbus_open(uri: str) -> bool:
+    rc, _ = _run(
+        [
+            "dbus-send",
+            "--print-reply",
+            "--dest=org.mpris.MediaPlayer2.spotify",
+            "/org/mpris/MediaPlayer2",
+            "org.mpris.MediaPlayer2.Player.OpenUri",
+            f"string:{uri}",
+        ],
+        timeout=5,
+    )
+    return rc == 0
+
+
+@tool("play_spotify", "Spotify masaüstü uygulamasında şarkı/sanatçı arayıp doğrudan çalar", {"query": "şarkı veya sanatçı adı"})
+def play_spotify(args: dict, ctx: Ctx) -> str:
+    q = str(args.get("query", "")).strip()
+    if not q:
+        return "Spotify'da ne çalacağımı söylemedin."
+
+    track_id, title = _spotify_find_track(q)
+    uri = f"spotify:track:{track_id}" if track_id else f"spotify:search:{q}"
+
+    # Spotify zaten açıksa doğrudan DBus OpenUri ile anında çal
+    if _spotify_dbus_open(uri):
+        return f"Spotify'da {title} çalınıyor."
+
+    # Spotify kapalıysa önce başlat, DBus'a gelmesini bekle ve çal
+    if shutil.which("spotify"):
+        _spawn(["spotify", f"--uri={uri}"])
+        for _ in range(16):
+            time.sleep(0.5)
+            if _spotify_dbus_open(uri):
+                return f"Spotify açıldı, {title} çalınıyor."
+        return f"Spotify açılıyor ve {title} başlatılıyor."
+
+    # Masaüstü uygulaması yoksa web üzerinden aç
+    web_url = f"https://open.spotify.com/track/{track_id}" if track_id else f"https://open.spotify.com/search/{q}"
+    _spawn(["xdg-open", web_url])
+    return f"Spotify web üzerinde {title} açıldı."
+
+
+@tool("play_youtube", "YouTube'da video/müzik bulup doğrudan oynatır", {"query": "video veya şarkı adı"})
 def play_youtube(args: dict, ctx: Ctx) -> str:
     q = str(args.get("query", "")).strip()
     if not q:
         return "Ne çalacağımı söylemedin."
     import urllib.parse
+
+    ytdlp = shutil.which("yt-dlp") or str(Path.home() / ".local/bin/yt-dlp")
+    if Path(ytdlp).exists():
+        rc, vid = _run([ytdlp, "--get-id", "--no-playlist", f"ytsearch1:{q}"], timeout=8)
+        vid = vid.strip().splitlines()[0] if rc == 0 and vid.strip() else ""
+        if vid and len(vid) == 11:
+            _spawn(["xdg-open", f"https://www.youtube.com/watch?v={vid}"])
+            return f"YouTube'da {q} çalınıyor."
 
     _spawn(["xdg-open", "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q)])
     return f"YouTube'da {q} açıldı."
@@ -451,18 +553,24 @@ def sleep_tool(args: dict, ctx: Ctx) -> str:
     return f"{minutes:g} dakika dinleniyorum."
 
 
+_DESTRUCTIVE_PAT = re.compile(
+    r"\b(rm\s+-r|rm\s+-f|mkfs|dd\s+if=|shutdown|reboot|poweroff|pacman\s+-R|chmod\s+-R\s+000|:>\s*/)\b"
+)
+
+
 @tool(
     "shell",
-    "Linux kabuğunda komut çalıştırır (onay ister)",
-    {"command": "çalıştırılacak komut"},
-    dangerous=True,
+    "Linux kabuğunda sistem komutu çalıştırır (tam sistem erişimi)",
+    {"command": "çalıştırılacak bash komutu"},
+    dangerous=False,
 )
 def shell(args: dict, ctx: Ctx) -> str:
     cmd = str(args.get("command", "")).strip()
     if not cmd:
         return "Komut boş."
-    if not ctx.confirm(f"Şu komutu çalıştırmamı onaylıyor musun? {cmd[:120]}"):
-        return "Komutu iptal ettim."
+    if _DESTRUCTIVE_PAT.search(cmd):
+        if not ctx.confirm(f"Bu kritik komutu çalıştırmamı onaylıyor musun? {cmd[:120]}"):
+            return "Komutu iptal ettim."
     rc, out = _run(["bash", "-lc", cmd], timeout=60)
     out = out.strip().replace("\n", " ")
     if len(out) > 300:
@@ -483,8 +591,6 @@ def power(args: dict, ctx: Ctx) -> str:
     name = {"shutdown": "kapatmamı", "reboot": "yeniden başlatmamı", "suspend": "uyutmamı"}.get(action)
     if not name:
         return "Geçersiz güç komutu."
-    if not ctx.confirm(f"Bilgisayarı {name} onaylıyor musun?"):
-        return "İptal ettim."
     cmd = {"shutdown": ["systemctl", "poweroff"], "reboot": ["systemctl", "reboot"],
            "suspend": ["systemctl", "suspend"]}[action]
     _spawn(cmd)
