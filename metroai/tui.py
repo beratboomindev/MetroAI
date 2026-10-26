@@ -525,8 +525,8 @@ class TUICtx(tools.Ctx):
                 daemon=True,
             ).start()
         try:
-            ans = input(_rl_prompt(f"\n  {ORANGE}{BOLD}👉 {question} [E]vet / [H]ayır (e/h): {RESET}")).strip().lower()
-            return ans.startswith(("e", "y", "o", "t", "1"))
+            ans = input(_rl_prompt(f"\n  {ORANGE}{BOLD}👉 {question} [E]vet (Enter) / [H]ayır (E/h): {RESET}")).strip().lower()
+            return ans == "" or ans.startswith(("e", "y", "o", "t", "1", "c", "ç"))
         except (EOFError, KeyboardInterrupt):
             return False
 
@@ -734,7 +734,7 @@ class MetroAssistantTUI:
             if detail:
                 for dl in detail.splitlines()[:12]:
                     lines.append(f"    {GRAY}${RESET} {WHITE}{dl}{RESET}")
-            lines.append(f"  {GRAY}(Sesle 'Evet / Hayır' diyebilir veya aşağıya e / h yazıp Enter'a basabilirsin){RESET}")
+            lines.append(f"  {GRAY}(Onaylamak için doğrudan Enter'a basabilir, e/h yazabilir veya sesle 'Evet / Hayır' diyebilirsin){RESET}")
             self._async_print("\n".join(lines))
         elif etype == "confirm_resolved":
             self._awaiting_daemon_confirm = False
@@ -1658,7 +1658,7 @@ class MetroAssistantTUI:
                 try:
                     self._in_prompt = True
                     prompt_str = (
-                        f"  {ORANGE}{BOLD}👉 Onaylıyor musun? [E]vet / [H]ayır (e/h): {RESET}"
+                        f"  {ORANGE}{BOLD}👉 Onaylıyor musun? [E]vet (Enter) / [H]ayır (E/h): {RESET}"
                         if self._awaiting_daemon_confirm
                         else f"{CYAN}{BOLD}metro ❯{RESET} "
                     )
@@ -1673,13 +1673,10 @@ class MetroAssistantTUI:
                     print(f"\n  {GRAY}(Çıkmak için /exit veya Ctrl+D){RESET}")
                     continue
 
-                if not user_in:
-                    continue
-
                 low_in = user_in.lower().strip()
                 daemon_st = STATUS_FILE.read_text(encoding="utf-8").strip() if STATUS_FILE.exists() else ""
                 if self._awaiting_daemon_confirm or daemon_st == "onay bekliyor":
-                    if low_in in ("e", "evet", "y", "yes", "onay", "tamam", "olur", "calistir", "çalıştır", "1"):
+                    if low_in in ("", "e", "evet", "y", "yes", "onay", "tamam", "olur", "calistir", "çalıştır", "1"):
                         self._awaiting_daemon_confirm = False
                         CONFIRM_FILE.write_text("yes", encoding="utf-8")
                         keys.trigger_cancel()
@@ -1689,6 +1686,9 @@ class MetroAssistantTUI:
                         CONFIRM_FILE.write_text("no", encoding="utf-8")
                         keys.trigger_cancel()
                         continue
+
+                if not user_in:
+                    continue
 
                 if user_in.startswith("/"):
                     try:

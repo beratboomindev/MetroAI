@@ -283,7 +283,8 @@ class CLICtx(tools.Ctx):
     def confirm(self, question: str, detail: str = "") -> bool:
         if detail:
             print(f"\n  Komut: {detail}")
-        return _ask(f"{question} (e/h)", "h").lower().startswith(("e", "y"))
+        ans = _ask(f"{question} (E/h)", "e").strip().lower()
+        return ans == "" or ans.startswith(("e", "y", "o", "t", "1"))
 
     def sleep_minutes(self, minutes: float) -> None:
         print(f"[{minutes:g} dk uyku]")
