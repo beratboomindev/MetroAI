@@ -19,7 +19,7 @@
 
 ---
 
-## ⚡ Tek Komutla Kurulum (6 Yaşındaki Çocuk Bile Kurabilir)
+## ⚡ Tek Komutla Kurulum
 
 Hangi klasörde olursan ol, terminali aç ve sadece şu komutu yapıştır:
 
