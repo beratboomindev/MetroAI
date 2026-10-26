@@ -134,7 +134,7 @@ class Runtime(tools.Ctx):
         self.mic.open()
         self.noise_floor = self.mic.calibrate(0.8)
         log_.info("ortam gürültü seviyesi: %.0f", self.noise_floor)
-        self._set_state("dinliyor")
+        self._set_state("hazır")
         if self.s.chime:
             audio.chime(self.s.sample_rate)
         self._notify("Metro hazır. 'Hey Metro' diyerek çağırabilirsin.")
@@ -152,7 +152,7 @@ class Runtime(tools.Ctx):
                 continue
             if self._was_paused:
                 self._was_paused = False
-                self._set_state("dinliyor")
+                self._set_state("hazır")
                 self.mic.flush()
                 self.wake.reset()
 
@@ -186,6 +186,7 @@ class Runtime(tools.Ctx):
                 pass
 
             # Hey Metro denildiğinde Metro Assistant terminal penceresini aç (açık değilse)
+            self._set_state("dinliyor")
             tui.emit_event("wake", origin="daemon")
             tui.ensure_terminal_open(self.s)
 
@@ -200,8 +201,6 @@ class Runtime(tools.Ctx):
 
             if self.s.chime:
                 audio.chime(self.s.sample_rate)
-            else:
-                self._set_state("uyandi")
 
             if self.s.ack_phrase:
                 self.say(self.s.ack_phrase)
@@ -220,7 +219,7 @@ class Runtime(tools.Ctx):
                     log_.info("dinleme ESC ile iptal edildi")
                 else:
                     log_.info("komut gelmedi")
-                self._set_state("dinliyor")
+                self._set_state("hazır")
                 return
 
             # LLM düşünürken TTS WebSocket bağlantısını arka planda önceden ısıt
@@ -260,7 +259,7 @@ class Runtime(tools.Ctx):
             self.mic.flush()
             self.wake.reset()
             if time.time() >= self.paused_until:
-                self._set_state("dinliyor")
+                self._set_state("hazır")
 
     # ---------- yardımcılar ----------
     def _banner(self) -> None:
