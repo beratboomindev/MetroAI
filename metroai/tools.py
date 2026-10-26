@@ -584,7 +584,7 @@ _FORBIDDEN_PAT = re.compile(
     dangerous=True,
 )
 def shell(args: dict, ctx: Ctx) -> str:
-    cmd = str(args.get("command", "")).strip()
+    cmd = str(args.get("command") or args.get("cmd") or args.get("script") or args.get("sh") or "").strip()
     if not cmd:
         return "Komut boş."
     if _FORBIDDEN_PAT.search(cmd):

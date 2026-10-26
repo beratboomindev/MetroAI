@@ -1570,6 +1570,13 @@ class MetroAssistantTUI:
             self.print_user_voice(text, src)
             tts.prewarm()
             reply = self.agent.handle(text)
+            emit_event(
+                "chat_turn",
+                origin="tui",
+                user_text=text,
+                text=reply,
+                model=self.chain.last_used,
+            )
             tts.speak(
                 reply,
                 self.s.voice,

@@ -89,7 +89,7 @@ class WakeWord:
     @staticmethod
     def _build_grammar(keywords: list[str]) -> str:
         phrases: list[str] = ["[unk]"]
-        prefixes = ("", "hey ", "alo ", "selam ", "merhaba ", "hi ", "ey ")
+        prefixes = ("", "hey ", "alo ", "selam ", "merhaba ", "ey ")
         variants = set(keywords) | {"metro", "metre"}
         for kw in variants:
             for pre in prefixes:

@@ -109,6 +109,17 @@ class Agent:
 
         name = payload.get("tool") or payload.get("name") or payload.get("action")
         args = payload.get("args") or payload.get("arguments") or payload.get("parameters") or {}
+        if isinstance(name, str):
+            name = {
+                "run_shell": "shell",
+                "bash": "shell",
+                "exec": "shell",
+                "terminal": "shell",
+                "get_time": "time_now",
+                "spotify": "play_spotify",
+                "youtube": "play_youtube",
+                "search": "web_search",
+            }.get(name, name)
         if not isinstance(name, str) or name not in tools.TOOLS:
             return raw.strip()
         if not isinstance(args, dict):
