@@ -67,93 +67,134 @@ def _info(msg: str) -> None:
 
 # ---------------------------------------------------------------- setup
 def cmd_setup(args) -> int:
+    from . import tui
+
     ensure_dirs()
     s = load() if CONFIG_PATH.exists() else Settings(providers=[Provider(**p) for p in DEFAULT_PROVIDERS])
+    chain = LLMChain(s)
 
-    print("\n\033[1mMetro kurulumu\033[0m — hepsi ücretsiz, kredi kartı yok.\n")
-    print("Aşağıdaki servislerden en az BİRİNİN ücretsiz anahtarını alman yeterli.")
-    print("Bir modelin kotası dolunca Metro otomatik olarak diğerine geçer.\n")
-    print("  Groq       → https://console.groq.com/keys        (en hızlı, whisper dahil)")
-    print("  Gemini     → https://aistudio.google.com/apikey   (geniş ücretsiz kota)")
-    print("  OpenRouter → https://openrouter.ai/keys           (onlarca :free model)")
-    print("  Cerebras   → https://cloud.cerebras.ai            (ücretsiz katman)")
-    print("  Mistral    → https://console.mistral.ai/api-keys  (ücretsiz katman)\n")
+    CYAN = "\033[38;5;75m"
+    GREEN = "\033[38;5;114m"
+    YELLOW = "\033[38;5;221m"
+    ORANGE = "\033[38;5;39m"
+    GRAY = "\033[38;5;244m"
+    WHITE = "\033[38;5;255m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
 
+    print(f"\n{GRAY}╭──────────────────────────────────────────────────────────╮{RESET}")
+    print(f"{GRAY}│{RESET}  {CYAN}{BOLD}◆ Metro Assistant — Hızlı Özelleştirme & Kurulum{RESET}        {GRAY}│{RESET}")
+    print(f"{GRAY}╰──────────────────────────────────────────────────────────╯{RESET}")
+    print(f"  {GRAY}(Varsayılan ayarları kabul etmek için doğrudan Enter'a basabilirsin){RESET}\n")
+
+    # Komut satırı bayraklarıyla doğrudan anahtar verildiyse kaydet
     for p in s.providers:
-        if p.keyless:
-            if p.id == "opencode":
-                from . import tui
-                if not tui.is_opencode_installed():
-                    tui.ensure_opencode_installed(interactive=True)
-                else:
-                    _ok("opencode: sistemde kurulu ve ücretsiz modeller hazır")
-            else:
-                _info(f"{p.id}: anahtarsız çalışıyor, atlandı")
-            continue
-        existing = p.api_key or ""
-        if args.groq and p.id == "groq":
+        if getattr(args, "groq", None) and p.id == "groq":
             p.api_key = args.groq
-            continue
-        if args.gemini and p.id == "gemini":
+        elif getattr(args, "gemini", None) and p.id == "gemini":
             p.api_key = args.gemini
-            continue
-        if args.openrouter and p.id == "openrouter":
+        elif getattr(args, "openrouter", None) and p.id == "openrouter":
             p.api_key = args.openrouter
-            continue
-        label = f"{p.id} API anahtarı"
-        if existing:
-            label += " (mevcut, boş bırak = koru)"
-        key = _ask_secret(label)
-        if key:
-            p.api_key = key
 
-    if not args.no_test:
-        if _ask("\nAnahtarları şimdi test edeyim mi? (E/h)", "E").lower().startswith(("e", "y")):
+    if args.keys_only:
+        save(s)
+        _ok(f"Anahtarlar kaydedildi: {CONFIG_PATH}")
+        return 0
+
+    # --- 1) Sağlayıcı & Model Seçimi ---
+    print(f"  {BOLD}[1/5] 🧠 Yapay Zeka Sağlayıcısı ve Model Seçimi{RESET}")
+    oc_prov = next((p for p in s.providers if p.id == "opencode"), None)
+    if oc_prov:
+        if not tui.is_opencode_installed():
+            tui.ensure_opencode_installed(interactive=True)
+        if tui.is_opencode_installed():
+            _info("OpenCode ücretsiz modelleri kontrol ediliyor...")
+            models = chain._discover(oc_prov, force=True)
+            if models:
+                oc_prov.models = models
+                _ok(f"OpenCode hazır ({len(models)} ücretsiz model bulundu)")
+                for i, m in enumerate(models, 1):
+                    mark = f"{GREEN}★{RESET}" if s.active_model == m else " "
+                    print(f"    {mark} {CYAN}{i}){RESET} {WHITE}{m}{RESET}")
+                print(f"      {CYAN}0){RESET} {GREEN}Otomatik Yedekli Zincir (Önerilen — biri dolunca diğerine geçer){RESET}")
+                pick = _ask(f"  {ORANGE}Başlangıç modeli seç (1-{len(models)} / Enter=Otomatik){RESET}", "0")
+                if pick.isdigit() and 1 <= int(pick) <= len(models):
+                    s.active_model = models[int(pick) - 1]
+                    _ok(f"Aktif model sabitlendi: {s.active_model}")
+                else:
+                    s.active_model = ""
+                    _ok("Model modu: Otomatik Zincir")
+
+    want_extra_api = _ask(f"\n  {GRAY}Ek olarak Groq / Gemini / OpenRouter API anahtarı girmek ister misin? (e/H){RESET}", "h")
+    if want_extra_api.lower().startswith(("e", "y")):
+        print(f"    {GRAY}• Groq       → https://console.groq.com/keys        (en hızlı LLM + Whisper STT){RESET}")
+        print(f"    {GRAY}• Gemini     → https://aistudio.google.com/apikey   (geniş ücretsiz kota){RESET}")
+        print(f"    {GRAY}• OpenRouter → https://openrouter.ai/keys           (onlarca :free model){RESET}")
+        for p in s.providers:
+            if p.keyless:
+                continue
+            label = f"    {p.id} API anahtarı (boş bırak = atla)"
+            if p.api_key:
+                label = f"    {p.id} API anahtarı (mevcut bağlı, boş bırak = koru)"
+            key = _ask_secret(label)
+            if key:
+                p.api_key = key
+        if not args.no_test:
             save(s)
             _test_providers(s)
 
-    print("\nSes ve uyandırma ayarları:")
-    if args.keys_only:
-        save(s)
-        print(f"\n\033[32mAnahtarlar kaydedildi:\033[0m {CONFIG_PATH}")
-        return 0
+    tui.mark_api_onboarded()
 
-    voice_choice = _ask(
-        "Ses [1=metro (tok erkek - önerilen), 2=brian (modern erkek), 3=seraphina (doğal kadın), 4=emel (klasik kadın), 5=değiştirme]",
-        "1",
-    )
-    if voice_choice == "1":
-        s.voice = "metro"
-    elif voice_choice == "2":
-        s.voice = "brian"
-    elif voice_choice == "3":
-        s.voice = "seraphina"
-    elif voice_choice == "4":
-        s.voice = "emel"
+    # --- 2) Ses Profili ---
+    print(f"\n  {BOLD}[2/5] 🎙️ Ses Profili Seçimi{RESET}")
+    voice_list = tts.voices()
+    cur_idx = "1"
+    for idx, (alias, gender, desc) in enumerate(voice_list, 1):
+        if alias == s.voice.lower():
+            cur_idx = str(idx)
+        mark = f"{GREEN}●{RESET}" if alias == s.voice.lower() else " "
+        print(f"    {mark} {CYAN}{idx}){RESET} {BOLD}{alias:<12}{RESET} {GRAY}{gender:<6}{RESET} {desc}")
+    v_pick = _ask(f"  {ORANGE}Ses seçimin (1-{len(voice_list)}){RESET}", cur_idx)
+    if v_pick.isdigit() and 1 <= int(v_pick) <= len(voice_list):
+        s.voice = voice_list[int(v_pick) - 1][0]
+    else:
+        s.voice = tts.resolve_voice(v_pick).alias
+    _ok(f"Ses profili: {s.voice}")
 
-    words = _ask("Uyandırma kelimesi", ", ".join(s.wake_words))
+    # --- 3) Uyandırma Kelimesi & Konuşma Tarzı ---
+    print(f"\n  {BOLD}[3/5] 🗣️ Uyandırma Kelimesi ve Konuşma Tarzı{RESET}")
+    words = _ask(f"  {ORANGE}Metro'yu hangi kelimeyle çağırmak istersin? (virgülle birden fazla yazabilirsin){RESET}", ", ".join(s.wake_words))
     s.wake_words = [w.strip().lower() for w in words.split(",") if w.strip()] or ["metro"]
+    _ok(f"Uyandırma kelimeleri: {', '.join(s.wake_words)}")
 
-    s.ack_phrase = _ask("Uyandıktan sonra kısa onay cümlesi (boş = sadece çan sesi)", s.ack_phrase)
+    custom_p = _ask(
+        f"  {ORANGE}Özel konuşma tarzı / talimat (boş bırak = doğal & kısa varsayılan){RESET}",
+        s.custom_prompt,
+    )
+    s.custom_prompt = custom_p.strip()
 
-    from . import tui
+    # --- 4) Konuşmak İçin Anahtar Tuş (Hotkey) ---
+    print(f"\n  {BOLD}[4/5] ⌨️ Konuşma Anahtar Tuşu (İsteğe Bağlı){RESET}")
     tui.prompt_hotkey_setup(s)
 
+    # --- 5) Pencere Görünümü (Her Zaman Üstte) ---
+    print(f"  {BOLD}[5/5] 📌 Pencere Görünümü{RESET}")
+    top_default = "E" if s.always_on_top else "h"
+    top_ans = _ask(f"  {ORANGE}Metro Assistant kutusu ekranda her zaman üstte dursun mu? (E/h){RESET}", top_default)
+    s.always_on_top = not top_ans.lower().startswith(("h", "n"))
+    tui.ensure_always_on_top_rule(s.always_on_top)
+    _ok(f"Her zaman üstte modu: {'Açık' if s.always_on_top else 'Kapalı'}")
+
     if not vosk_path(s).exists():
-        print("\nTürkçe uyandırma modeli indiriliyor (~50 MB)...")
-        ok = _download_vosk(MODELS_DIR)
-        if ok:
+        print("\n  Türkçe ses tanıma modeli indiriliyor (~50 MB)...")
+        if _download_vosk(MODELS_DIR):
             _ok("Model hazır: models/vosk-model-small-tr-0.3")
         else:
             _bad("Model indirilemedi. Daha sonra `./metro setup` ile tekrar dene.")
-    else:
-        _ok(f"Model mevcut: {vosk_path(s).name}")
 
     save(s)
-    print(f"\n\033[32mAyarlar kaydedildi:\033[0m {CONFIG_PATH}")
-    print("\nBaşlatmak için:")
-    print("  ./metro service install    # arka planda, açılışta otomatik")
-    print("  ./metro                    # terminalde ön planda test")
+    print(f"\n  {GREEN}{BOLD}✓ Tüm ayarlar kaydedildi:{RESET} {CONFIG_PATH}")
+    print(f"  {GRAY}(Bu ayarları istediğin zaman konsolda /ayarlar, /model, /voice veya /hotkey yazarak değiştirebilirsin){RESET}\n")
     return 0
 
 

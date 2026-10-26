@@ -22,7 +22,7 @@ for cmd in git curl unzip python3 mpv; do
 done
 
 if (( ${#need_pkgs[@]} > 0 )); then
-  echo "[1/7] Eksik sistem paketleri kuruluyor (${need_pkgs[*]})..."
+  echo "[1/6] Eksik sistem paketleri kuruluyor (${need_pkgs[*]})..."
   if command -v pacman >/dev/null 2>&1; then
     sudo pacman -Sy --needed --noconfirm git curl unzip python mpv libnotify
   elif command -v apt-get >/dev/null 2>&1; then
@@ -31,7 +31,7 @@ if (( ${#need_pkgs[@]} > 0 )); then
     sudo dnf install -y git curl unzip python3 mpv libnotify
   fi
 else
-  echo "[1/7] Sistem araçları hazır."
+  echo "[1/6] Sistem araçları hazır."
 fi
 
 # 2) Repo dışından (curl | bash ile) çalıştırıldıysa ~/MetroAI içine klonla
@@ -44,10 +44,10 @@ if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/requirements.txt" && -d "$SCRIPT_DIR/m
   INSTALL_DIR="$SCRIPT_DIR"
 else
   if [[ -d "$INSTALL_DIR/.git" ]]; then
-    echo "[2/7] Mevcut MetroAI kurulumu güncelleniyor ($INSTALL_DIR)..."
+    echo "[2/6] Mevcut MetroAI kurulumu güncelleniyor ($INSTALL_DIR)..."
     git -C "$INSTALL_DIR" pull --ff-only || true
   else
-    echo "[2/7] MetroAI indiriliyor ($INSTALL_DIR)..."
+    echo "[2/6] MetroAI indiriliyor ($INSTALL_DIR)..."
     git clone "$REPO_URL" "$INSTALL_DIR"
   fi
 fi
@@ -56,37 +56,18 @@ cd "$INSTALL_DIR"
 
 # 3) Python sanal ortamı ve paketler
 if [[ ! -x venv/bin/python ]]; then
-  echo "[3/7] Python sanal ortamı oluşturuluyor..."
+  echo "[3/6] Python sanal ortamı oluşturuluyor..."
   python3 -m venv venv
 else
-  echo "[3/7] Python sanal ortamı hazır."
+  echo "[3/6] Python sanal ortamı hazır."
 fi
 
-echo "[4/7] Python paketleri yükleniyor..."
+echo "[4/6] Python paketleri yükleniyor..."
 venv/bin/python -m pip install --quiet --upgrade pip
 venv/bin/python -m pip install --quiet -r requirements.txt
 
-# 4) OpenCode kontrolü ve kurulum yardımcısı
-export PATH="$HOME/.opencode/bin:$PATH"
-if command -v opencode >/dev/null 2>&1; then
-  echo "[5/7] OpenCode kurulu ($(command -v opencode)) — ücretsiz modeller hazır."
-else
-  echo "[5/7] OpenCode sistemde kurulu görünmüyor."
-  echo "      (OpenCode ile API anahtarı olmadan ücretsiz yapay zeka modellerini kullanabilirsin)"
-  install_oc="e"
-  if [[ -r /dev/tty ]]; then
-    printf "      OpenCode şimdi otomatik kurulsun mu? [E/h]: "
-    read -r install_oc </dev/tty || install_oc="e"
-  fi
-  if [[ -z "$install_oc" || "$install_oc" =~ ^[EeYy] ]]; then
-    echo "      ⬇ OpenCode indiriliyor ve kuruluyor..."
-    curl -fsSL https://opencode.ai/install | bash || true
-    export PATH="$HOME/.opencode/bin:$PATH"
-  fi
-fi
-
-# 5) Türkçe uyandırma modeli
-echo "[6/7] Türkçe ses tanıma modeli hazırlanıyor..."
+# 4) Türkçe uyandırma modeli
+echo "[5/6] Türkçe ses tanıma modeli hazırlanıyor..."
 if [[ ! -d models/vosk-model-small-tr-0.3 ]]; then
   mkdir -p models
   tmp="models/tr-model.zip"
@@ -96,19 +77,21 @@ if [[ ! -d models/vosk-model-small-tr-0.3 ]]; then
   rm -f "$tmp"
 fi
 
-# 6) Varsayılan config.toml, isteğe bağlı konuşma anahtar tuşu, PATH ve Masaüstü Kısayolu
+# 5) Hızlı Özelleştirme Sihirbazı (Model, Ses, Uyandırma Kelimesi, Kısayol Tuşu, Her Zaman Üstte)
 chmod +x metro
+export PATH="$HOME/.opencode/bin:$PATH"
 if [[ ! -f config.toml ]]; then
   venv/bin/python -c "from metroai import settings; settings.save(settings.load())"
 fi
 
-if [[ -r /dev/tty ]]; then
-  venv/bin/python -c "from metroai import settings, tui; s = settings.load(); tui.prompt_hotkey_setup(s)" </dev/tty || true
+if [[ -r /dev/tty && "${METRO_NONINTERACTIVE:-0}" != "1" ]]; then
+  ./metro setup </dev/tty || true
+else
+  venv/bin/python -c "from metroai import settings, tui; tui.ensure_always_on_top_rule(settings.load().always_on_top)" || true
 fi
 
-echo "[7/7] Sistem entegrasyonu ve arka plan servisi kuruluyor..."
-venv/bin/python -c "from metroai import settings, tui; tui.ensure_always_on_top_rule(settings.load().always_on_top)" || true
-
+# 6) Sistem entegrasyonu (PATH, Masaüstü Kısayolu ve Arka Plan Servisi)
+echo "[6/6] Sistem entegrasyonu ve arka plan servisi kuruluyor..."
 mkdir -p "$HOME/.local/bin"
 ln -sf "$INSTALL_DIR/metro" "$HOME/.local/bin/metro"
 
@@ -147,5 +130,5 @@ echo ""
 echo "  • Sesli çağırmak için : Sadece \"Hey Metro\" de veya atadığın tuşa bas!"
 echo "  • Dinlemeyi bırakmak  : ESC tuşuna bas"
 echo "  • Konsolu açmak için  : metro chat"
-echo "  • Sağlayıcı bağlamak  : metro chat içinde /api yaz"
+echo "  • Ayarları değiştirmek: metro setup  (veya konsolda /ayarlar)"
 echo ""
