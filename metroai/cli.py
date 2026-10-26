@@ -613,7 +613,9 @@ def main(argv: list[str] | None = None) -> int:
     logfile = LOG_DIR / "metro.log"
     if logfile.exists() and logfile.stat().st_size > 5 * 1024 * 1024:
         logfile.replace(LOG_DIR / "metro.log.1")
-    log.setup(verbose=getattr(args, "verbose", False), logfile=logfile)
+    cmd_name = getattr(args, "cmd", None)
+    verbose = getattr(args, "verbose", False)
+    log.setup(verbose=verbose, logfile=logfile, console=(cmd_name is None or verbose))
 
     try:
         return int(args.func(args) or 0)

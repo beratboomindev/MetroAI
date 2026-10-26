@@ -8,7 +8,7 @@ from pathlib import Path
 _CONFIGURED = False
 
 
-def setup(verbose: bool = False, logfile: Path | None = None) -> logging.Logger:
+def setup(verbose: bool = False, logfile: Path | None = None, console: bool = True) -> logging.Logger:
     global _CONFIGURED
     logger = logging.getLogger("metro")
     if _CONFIGURED:
@@ -17,9 +17,10 @@ def setup(verbose: bool = False, logfile: Path | None = None) -> logging.Logger:
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
     fmt = logging.Formatter("%(asctime)s  %(levelname)-7s %(message)s", "%H:%M:%S")
 
-    stream = logging.StreamHandler(sys.stdout)
-    stream.setFormatter(fmt)
-    logger.addHandler(stream)
+    if console:
+        stream = logging.StreamHandler(sys.stdout)
+        stream.setFormatter(fmt)
+        logger.addHandler(stream)
 
     if logfile is not None:
         logfile.parent.mkdir(parents=True, exist_ok=True)

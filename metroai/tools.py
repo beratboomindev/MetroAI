@@ -572,6 +572,23 @@ def sleep_tool(args: dict, ctx: Ctx) -> str:
     return f"{minutes:g} dakika dinleniyorum."
 
 
+@tool("close_metro", "Metro Assistant penceresini ve sohbet ekranını kapatır", {})
+def close_metro(args: dict, ctx: Ctx) -> str:
+    def _do_close():
+        time.sleep(0.5)
+        pid_file = STATE_DIR / "tui.pid"
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text(encoding="utf-8").strip())
+                pid_file.unlink(missing_ok=True)
+                os.kill(pid, 15)
+            except Exception:
+                pass
+
+    threading.Thread(target=_do_close, daemon=True).start()
+    return "Görüşürüz, kendimi kapatıyorum."
+
+
 _FORBIDDEN_PAT = re.compile(
     r"(rm\s+-[rf]+\s+/(?:\s|$|\*)|mkfs\.|dd\s+if=.*of=/dev/sd|dd\s+if=.*of=/dev/nvme|:\(\)\{.*\})"
 )

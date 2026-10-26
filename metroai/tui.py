@@ -1627,6 +1627,9 @@ class MetroAssistantTUI:
         else:
             self.print_assistant(reply, self.chain.last_used)
 
+        if "kendimi kapatıyorum" in reply.lower():
+            self.running = False
+
     # ---------- Ana Döngü ----------
     def run(self) -> int:
         try:

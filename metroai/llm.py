@@ -253,7 +253,7 @@ class LLMChain:
         for provider, model in cands:
             try:
                 text = self._call(provider, model, messages, max_tokens, temperature)
-                self.last_used = f"{provider.id}/{model}"
+                self.last_used = model if model.startswith(f"{provider.id}/") else f"{provider.id}/{model}"
                 log_.info("yanıt: %s", self.last_used)
                 return Reply(text=text, provider=provider.id, model=model)
             except _ModelError as e:

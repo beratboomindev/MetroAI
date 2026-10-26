@@ -119,6 +119,10 @@ class Agent:
                 "spotify": "play_spotify",
                 "youtube": "play_youtube",
                 "search": "web_search",
+                "exit": "close_metro",
+                "quit": "close_metro",
+                "close": "close_metro",
+                "close_self": "close_metro",
             }.get(name, name)
         if not isinstance(name, str) or name not in tools.TOOLS:
             return raw.strip()
@@ -161,7 +165,12 @@ class Agent:
         )
         if msp:
             return tools.play_spotify({"query": msp.group(1).strip()}, self.ctx)
-        if re.fullmatch(r"(uyu|dinlen|kapan|gizlen|metro kapan)[\s!.,]*", t):
+        if re.fullmatch(
+            r"(?:hey\s+metro\s+|metro\s+)?(kendini\s+kapat|kapat\s+kendini|kapan|metro\s+kapan|pencereyi\s+kapat|uygulamayi\s+kapat|asistani\s+kapat|cik|cikis|cikis\s+yap|gorusuruz)[\s!.,]*",
+            t,
+        ):
+            return tools.close_metro({}, self.ctx)
+        if re.fullmatch(r"(?:hey\s+metro\s+|metro\s+)?(uyu|dinlen|gizlen|sessize\s+gec)[\s!.,]*", t):
             self.ctx.sleep_minutes(15)
             return "Tamam, on beş dakika dinleniyorum. Beni tekrar çağırırsan buradayım."
         m = re.fullmatch(r"(?:zamanlayici|hatirlatici|timer)\s*(?:kur\s*)?(\d+)\s*(?:dakika|dk)?", t)
