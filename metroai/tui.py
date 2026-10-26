@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__, audio, keys, log, tools, tts
+from . import __version__, audio, keys, log, memory, tools, tts
 from .agent import Agent
 from .llm import LLMChain
 from .settings import ROOT, STATE_DIR, Provider, Settings, ensure_dirs, load, save, vosk_path
@@ -55,6 +55,13 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 def _vis_len(s: str) -> int:
     """ANSI renk kodları hariç görünür karakter uzunluğu."""
     return len(_ANSI_RE.sub("", s))
+
+
+def _rl_prompt(s: str) -> str:
+    """GNU readline'ın görünmez ANSI renk kodlarını genişlik olarak saymaması için
+    tüm \\033[...m dizilerini \\001 ve \\002 içine alır (uzun yazı ve silme kaymasını %100 önler).
+    """
+    return _ANSI_RE.sub(lambda m: f"\001{m.group(0)}\002", s)
 
 
 def _truncate_ansi(s: str, max_vis: int) -> str:
@@ -117,7 +124,7 @@ def ensure_opencode_installed(interactive: bool = True) -> bool:
     print(f"  {GRAY}OpenCode sayesinde kredi kartı veya API anahtarı olmadan ücretsiz yapay zeka modellerini kullanabilirsin.{RESET}")
     if interactive:
         try:
-            ans = input(f"  {CYAN}OpenCode şimdi otomatik kurulsun mu? (E/h): {RESET}").strip().lower()
+            ans = input(_rl_prompt(f"  {CYAN}OpenCode şimdi otomatik kurulsun mu? (E/h): {RESET}")).strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
         if ans and not ans.startswith(("e", "y", "")):
@@ -156,7 +163,7 @@ def prompt_hotkey_setup(s: Settings) -> str:
         print(f"{GRAY}Atlandı (tuş seçilmedi){RESET}")
         if s.hotkey:
             try:
-                ans = input(f"  {GRAY}Mevcut kısayolu ({keys.format_hotkey(s.hotkey)}) kaldırmak ister misin? (e/H): {RESET}").strip().lower()
+                ans = input(_rl_prompt(f"  {GRAY}Mevcut kısayolu ({keys.format_hotkey(s.hotkey)}) kaldırmak ister misin? (e/H): {RESET}")).strip().lower()
                 if ans.startswith(("e", "y")):
                     s.hotkey = ""
                     save(s)
@@ -243,10 +250,55 @@ def _desktop_env() -> dict[str, str]:
     return env
 
 
+def ensure_desktop_icon() -> None:
+    """Uygulama logosunu (Logo 4) masaüstü kısayoluna ve KDE/Freedesktop ikon önbelleğine yerleştirir."""
+    try:
+        png_src = ROOT / "assets" / "metro-icon.png"
+        svg_src = ROOT / "assets" / "metro-icon.svg"
+        if not png_src.exists():
+            return
+
+        icons_base = Path.home() / ".local" / "share" / "icons" / "hicolor"
+        for sz in ("128x128", "256x256", "512x512"):
+            d = icons_base / sz / "apps"
+            d.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(png_src, d / "metro-assistant.png")
+
+        if svg_src.exists():
+            sd = icons_base / "scalable" / "apps"
+            sd.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(svg_src, sd / "metro-assistant.svg")
+
+        apps_dir = Path.home() / ".local" / "share" / "applications"
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        desktop_file = apps_dir / "metro-assistant.desktop"
+        content = (
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=Metro Assistant\n"
+            "Comment=Sesli ve Yazılı Yapay Zeka Asistanı\n"
+            f"Exec={ROOT / 'metro'} chat -w\n"
+            f"Icon={png_src}\n"
+            "StartupWMClass=metro-assistant\n"
+            "Terminal=false\n"
+            "Categories=Utility;AudioVideo;\n"
+            "StartupNotify=false\n"
+        )
+        old = desktop_file.read_text(encoding="utf-8", errors="ignore") if desktop_file.exists() else ""
+        if old != content:
+            desktop_file.write_text(content, encoding="utf-8")
+            env = _desktop_env()
+            for cmd in (["kbuildsycoca6", "--noincremental"], ["update-desktop-database", str(apps_dir)]):
+                if shutil.which(cmd[0]):
+                    subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        log_.debug("masaüstü ikonu güncellenemedi: %s", e)
+
+
 def ensure_always_on_top_rule(enabled: bool = True) -> None:
     """
     Metro Assistant penceresinin masaüstünde her zaman en üstte (Always on Top)
-    kalması için KDE KWin kuralını ve X11/Wayland pencere bayraklarını ayarlar.
+    kalması veya kapatıldığında anında normale dönmesi için KDE KWin kuralını ayarlar.
     """
     env = _desktop_env()
     try:
@@ -259,8 +311,7 @@ def ensure_always_on_top_rule(enabled: bool = True) -> None:
                         existing_order = line.split("=", 1)[1].strip()
                         break
             orders = [x for x in existing_order.split(",") if x and x != "metro-assistant"]
-            if enabled:
-                orders.append("metro-assistant")
+            orders.append("metro-assistant")
             new_order = ",".join(orders)
 
             subprocess.run(
@@ -275,37 +326,39 @@ def ensure_always_on_top_rule(enabled: bool = True) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            if enabled:
-                rule_pairs = [
-                    ("Description", "Metro Assistant Her Zaman Ustte"),
-                    ("wmclass", "metro-assistant"),
-                    ("wmclassmatch", "1"),
-                    ("above", "true"),
-                    ("aboverule", "2"),
-                ]
-                for k, v in rule_pairs:
-                    subprocess.run(
-                        ["kwriteconfig6", "--file", "kwinrulesrc", "--group", "metro-assistant", "--key", k, v],
-                        env=env,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
+            rule_pairs = [
+                ("Description", "Metro Assistant Pencere Kurali"),
+                ("wmclass", "metro-assistant"),
+                ("wmclassmatch", "1"),
+                ("above", "true" if enabled else "false"),
+                # aboverule=2 (Force) açık olan pencerenin de Her Zaman Üstte durumunu anında değiştirir
+                ("aboverule", "2"),
+            ]
+            for k, v in rule_pairs:
+                subprocess.run(
+                    ["kwriteconfig6", "--file", "kwinrulesrc", "--group", "metro-assistant", "--key", k, v],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
             for qdbus_bin in ("qdbus6", "qdbus"):
                 if shutil.which(qdbus_bin):
-                    subprocess.Popen(
+                    subprocess.run(
                         [qdbus_bin, "org.kde.KWin", "/KWin", "reconfigure"],
                         env=env,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
+                        timeout=3,
                     )
                     break
     except Exception as e:
         log_.debug("KWin her zaman üstte kuralı ayarlanamadı: %s", e)
 
-    if enabled and shutil.which("wmctrl"):
+    if shutil.which("wmctrl"):
         try:
+            flag = "add,above" if enabled else "remove,above"
             subprocess.Popen(
-                ["wmctrl", "-r", "Metro Assistant", "-b", "add,above"],
+                ["wmctrl", "-r", "Metro Assistant", "-b", flag],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -316,7 +369,8 @@ def ensure_always_on_top_rule(enabled: bool = True) -> None:
 
 def ensure_terminal_open(settings: Settings | None = None) -> bool:
     """Açık bir Metro Assistant penceresi yoksa her zaman üstte duran yeni bir pencere açar."""
-    s = settings or load()
+    s = load() if settings is None else load()
+    ensure_desktop_icon()
     ensure_always_on_top_rule(s.always_on_top)
 
     if is_tui_running():
@@ -399,7 +453,7 @@ class TUICtx(tools.Ctx):
                 daemon=True,
             ).start()
         try:
-            ans = input(f"\n  {ORANGE}{BOLD}👉 {question} [E]vet / [H]ayır (e/h): {RESET}").strip().lower()
+            ans = input(_rl_prompt(f"\n  {ORANGE}{BOLD}👉 {question} [E]vet / [H]ayır (e/h): {RESET}")).strip().lower()
             return ans.startswith(("e", "y", "o", "t", "1"))
         except (EOFError, KeyboardInterrupt):
             return False
@@ -494,7 +548,7 @@ class MetroAssistantTUI:
         line2 = (
             f"{GRAY}Komut:{RESET} {WHITE}/model{RESET} {GRAY}•{RESET} "
             f"{WHITE}/api{RESET} {GRAY}•{RESET} {WHITE}/voice{RESET} {GRAY}•{RESET} "
-            f"{WHITE}/hotkey{RESET} {GRAY}•{RESET} {WHITE}/ayarlar{RESET} {GRAY}•{RESET} {WHITE}/help{RESET}"
+            f"{WHITE}/hafiza{RESET} {GRAY}•{RESET} {WHITE}/ayarlar{RESET} {GRAY}•{RESET} {WHITE}/help{RESET}"
         )
 
         return [
@@ -525,14 +579,10 @@ class MetroAssistantTUI:
                 sys.stdout.write("\r\033[K")
             sys.stdout.write(block + "\n")
             if self._in_prompt:
-                if self._awaiting_daemon_confirm:
-                    sys.stdout.write(f"  {ORANGE}{BOLD}👉 Onaylıyor musun? [E]vet / [H]ayır (e/h): {RESET}")
-                else:
-                    sys.stdout.write(f"{CYAN}{BOLD}metro ❯{RESET} ")
                 try:
-                    sys.stdout.write(readline.get_line_buffer())
+                    readline.forced_update_display()
                 except Exception:
-                    pass
+                    sys.stdout.write(f"{CYAN}{BOLD}metro ❯{RESET} ")
             sys.stdout.flush()
 
     def print_user_voice(self, text: str, source: str = "stt") -> None:
@@ -765,7 +815,7 @@ class MetroAssistantTUI:
         print(f"    {CYAN}0){RESET} Vazgeç / Kapat\n")
 
         try:
-            ch = input(f"  {ORANGE}{BOLD}Seçimin (1-{len(idx_map)} / a / e / p / r / 0) [0]: {RESET}").strip().lower()
+            ch = input(_rl_prompt(f"  {ORANGE}{BOLD}Seçimin (1-{len(idx_map)} / a / e / p / r / 0) [0]: {RESET}")).strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return
@@ -816,7 +866,7 @@ class MetroAssistantTUI:
             print(f"    {CYAN}0){RESET} Kaydet ve Çık\n")
 
             try:
-                c = input(f"  {ORANGE}{BOLD}Değiştirmek istediğin ayar (1-9 / 0) [0]: {RESET}").strip()
+                c = input(_rl_prompt(f"  {ORANGE}{BOLD}Değiştirmek istediğin ayar (1-9 / 0) [0]: {RESET}")).strip()
             except (EOFError, KeyboardInterrupt):
                 print()
                 break
@@ -907,6 +957,55 @@ class MetroAssistantTUI:
         save(self.s)
         print(f"\n  {GREEN}✓{RESET} Özel komut oluşturuldu: {BOLD}{CYAN}/{cmd_name}{RESET} → {WHITE}{cmd_val}{RESET}\n")
 
+    # ---------- Kalıcı Hafıza Yönetimi (/hafiza) ----------
+    def _manage_memory(self, arg: str = "") -> None:
+        arg = arg.strip()
+        low = arg.lower()
+
+        if low in ("temizle", "clear", "sifirla", "sıfırla", "reset"):
+            memory.clear_all()
+            print(f"\n  {GREEN}✓{RESET} Kalıcı hafıza tamamen temizlendi.\n")
+            return
+
+        if low.startswith(("sil ", "del ", "rm ", "unut ")):
+            q = arg.split(maxsplit=1)[1].strip()
+            if memory.remove_fact(q):
+                print(f"\n  {GREEN}✓{RESET} '{q}' hafızadan silindi.\n")
+            else:
+                print(f"\n  {YELLOW}'{q}' hafızada bulunamadı.{RESET}\n")
+            return
+
+        if low.startswith(("ekle ", "add ", "kaydet ")):
+            fact = arg.split(maxsplit=1)[1].strip()
+            saved = memory.add_fact(fact, "kullanici")
+            if saved:
+                print(f"\n  {GREEN}✓{RESET} Hafızaya eklendi: {WHITE}{saved}{RESET}\n")
+            return
+
+        if arg:
+            saved = memory.add_fact(arg, "kullanici")
+            if saved:
+                print(f"\n  {GREEN}✓{RESET} Hafızaya eklendi: {WHITE}{saved}{RESET}\n")
+            return
+
+        prof, facts = memory.list_all()
+        print(f"\n  {BOLD}🧠 Metro Kalıcı Hafıza (Ultra Düşük Token Modu):{RESET}")
+        if not prof and not facts:
+            print(f"  {GRAY}Henüz kayıtlı bir bilgi yok. Konuşurken 'Benim adım ...', 'Unutma ...' dediğinde otomatik öğrenir.{RESET}")
+        else:
+            if prof:
+                print(f"  {CYAN}Profil:{RESET}")
+                for k, v in prof.items():
+                    print(f"    • {BOLD}{k.capitalize()}:{RESET} {WHITE}{v}{RESET}")
+            if facts:
+                print(f"  {CYAN}Hatırlanan Bilgiler ({len(facts)}):{RESET}")
+                for idx, item in enumerate(facts, 1):
+                    print(f"    {CYAN}{idx:>2}){RESET} {WHITE}{item.get('text', '')}{RESET}")
+        print(f"\n  {GRAY}Komutlar:{RESET}")
+        print(f"    {WHITE}/hafiza ekle <bilgi>{RESET}    Yeni bilgi ekle")
+        print(f"    {WHITE}/hafiza sil <no|kelime>{RESET} Bilgiyi sil")
+        print(f"    {WHITE}/hafiza temizle{RESET}         Tüm hafızayı sıfırla\n")
+
     # ---------- Provider / API Bağlama ve Model Çekme Sihirbazı ----------
     def _pull_provider_models(self, pid: str | None = None) -> None:
         self.s = load()
@@ -964,7 +1063,7 @@ class MetroAssistantTUI:
             print(f"    {CYAN}0){RESET} {GRAY}Tamamla ve sohbete başla{RESET}\n")
 
             try:
-                choice = input(f"  {ORANGE}{BOLD}Seçimin (1-{len(providers)} / m / p / k / 0) [1]:{RESET} ").strip().lower() or "1"
+                choice = input(_rl_prompt(f"  {ORANGE}{BOLD}Seçimin (1-{len(providers)} / m / p / k / 0) [1]:{RESET} ")).strip().lower() or "1"
             except (EOFError, KeyboardInterrupt):
                 print()
                 mark_api_onboarded()
@@ -1096,6 +1195,7 @@ class MetroAssistantTUI:
             print(f"  {CYAN}/voice{RESET} {GRAY}(veya /v){RESET}      Ses profilini numaralı menüden seç veya test et")
             print(f"  {CYAN}/hotkey{RESET} {GRAY}(veya /tus){RESET}   Konuşmak için anahtar tuş ata veya kaldır")
             print(f"  {CYAN}/wake <kelimeler>{RESET}   Uyandırma kelimelerini özelleştir (örn: {WHITE}/wake metro, asistan{RESET})")
+            print(f"  {CYAN}/hafiza{RESET} {GRAY}(veya /mem){RESET}    Kalıcı hafızayı görüntüle, bilgi ekle veya sil (düşük token)")
             print(f"  {CYAN}/prompt <talimat>{RESET}   Metro'nun kişiliğini/konuşma tarzını özelleştir")
             print(f"  {CYAN}/komut{RESET} {GRAY}(veya /alias){RESET}  Kendi özel slash komutlarını oluştur (örn: {WHITE}/komut ekle /ozet ...{RESET})")
             print(f"  {CYAN}/ayarlar{RESET} {GRAY}(veya /set){RESET}  Tüm ayarları tek menüden görüntüle ve değiştir")
@@ -1121,6 +1221,10 @@ class MetroAssistantTUI:
 
         if cmd in ("/komut", "/alias", "/aliases", "/kisayol"):
             self._manage_aliases(arg)
+            return True
+
+        if cmd in ("/hafiza", "/hafıza", "/memory", "/mem", "/bellek"):
+            self._manage_memory(arg)
             return True
 
         if cmd in ("/prompt", "/persona", "/sistem", "/system"):
@@ -1208,7 +1312,7 @@ class MetroAssistantTUI:
                     mark = f"{GREEN}●{RESET}" if alias == self.s.voice.lower() else " "
                     print(f"  {mark} {CYAN}{idx}){RESET} {BOLD}{alias:<13}{RESET} {GRAY}{gender:<6}{RESET} {desc}")
                 try:
-                    pick = input(f"\n  {ORANGE}{BOLD}Seçmek istediğin ses numarası veya adı (Enter=Kapat): {RESET}").strip()
+                    pick = input(_rl_prompt(f"\n  {ORANGE}{BOLD}Seçmek istediğin ses numarası veya adı (Enter=Kapat): {RESET}")).strip()
                 except (EOFError, KeyboardInterrupt):
                     print()
                     return True
@@ -1339,6 +1443,8 @@ class MetroAssistantTUI:
         except Exception:
             pass
 
+        self.s = load()
+        ensure_desktop_icon()
         ensure_always_on_top_rule(self.s.always_on_top)
 
         try:
@@ -1360,7 +1466,12 @@ class MetroAssistantTUI:
             while self.running:
                 try:
                     self._in_prompt = True
-                    user_in = input(f"{CYAN}{BOLD}metro ❯{RESET} ").strip()
+                    prompt_str = (
+                        f"  {ORANGE}{BOLD}👉 Onaylıyor musun? [E]vet / [H]ayır (e/h): {RESET}"
+                        if self._awaiting_daemon_confirm
+                        else f"{CYAN}{BOLD}metro ❯{RESET} "
+                    )
+                    user_in = input(_rl_prompt(prompt_str)).strip()
                     self._in_prompt = False
                 except EOFError:
                     print()

@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Protocol
 
-from . import log
+from . import log, memory
 from .settings import STATE_DIR
 
 log_ = log.get()
@@ -521,6 +521,25 @@ def note_list(args: dict, ctx: Ctx) -> str:
     if not lines:
         return "Henüz not yok."
     return "Son notlar: " + " | ".join(lines[-3:])
+
+
+@tool("memory_save", "Kullanıcıyla ilgili önemli bir bilgiyi/tercihi kalıcı hafızaya kaydeder", {"fact": "hatırlanacak kısa bilgi"})
+def memory_save(args: dict, ctx: Ctx) -> str:
+    fact = str(args.get("fact") or args.get("text") or "").strip()
+    if not fact:
+        return "Kaydedilecek bilgi boş."
+    saved = memory.add_fact(fact)
+    return f"Aklımda tuttum: {saved}"
+
+
+@tool("memory_forget", "Kalıcı hafızadan bir bilgiyi siler", {"query": "silinecek bilgi"})
+def memory_forget(args: dict, ctx: Ctx) -> str:
+    q = str(args.get("query") or args.get("fact") or "").strip()
+    if not q:
+        return "Neyi unutacağımı söylemedin."
+    if memory.remove_fact(q):
+        return "Hafızamdan sildim."
+    return "Hafızamda böyle bir bilgi bulamadım."
 
 
 @tool("timer", "Geri sayım kurar", {"minutes": "dakika", "label": "hatırlatma metni"})

@@ -6,7 +6,7 @@ import re
 from collections import deque
 from datetime import datetime
 
-from . import log, tools
+from . import log, memory, tools
 from .llm import LLMChain, NoModelAvailable
 from .settings import Settings
 
@@ -54,11 +54,14 @@ class Agent:
         if not text:
             return "Seni duyamadım."
 
+        # 0-token yerel hafıza çıkarımı (isim, tercih, "unutma..." vb.)
+        memory.auto_extract(text)
+
         fast = self._fast(text)
         if fast is not None:
             return fast
 
-        messages = [{"role": "system", "content": self._system()}]
+        messages = [{"role": "system", "content": self._system(query=text)}]
         for u, a in self.history:
             messages.append({"role": "user", "content": u})
             messages.append({"role": "assistant", "content": a})
@@ -75,12 +78,15 @@ class Agent:
         return out
 
     # ---------- LLM çıktısı ----------
-    def _system(self) -> str:
+    def _system(self, query: str = "") -> str:
         base = SYSTEM_PROMPT.format(
             name=self.s.name,
             date=datetime.now().strftime("%d.%m.%Y %H:%M"),
             tools=tools.spec_text(),
         )
+        mem_ctx = memory.relevant_context(query, max_chars=200)
+        if mem_ctx:
+            base += f"\nKULLANICI HAFIZASI: {mem_ctx}\n"
         if self.s.custom_prompt:
             base += f"\nKULLANICI ÖZEL TALİMATI:\n{self.s.custom_prompt}\n"
         return base
