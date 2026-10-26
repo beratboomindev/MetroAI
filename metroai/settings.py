@@ -48,6 +48,9 @@ class Settings:
     always_on_top: bool = True
     terminal: str = "auto"
     hotkey: str = ""
+    active_model: str = ""
+    custom_prompt: str = ""
+    aliases: dict[str, str] = field(default_factory=dict)
     max_reply_chars: int = 500
     history_turns: int = 6
     providers: list[Provider] = field(default_factory=list)
@@ -142,8 +145,14 @@ def load() -> Settings:
     s.always_on_top = bool(a.get("always_on_top", s.always_on_top))
     s.terminal = str(a.get("terminal", s.terminal))
     s.hotkey = str(a.get("hotkey", s.hotkey)).strip()
+    s.active_model = str(a.get("active_model", s.active_model)).strip()
+    s.custom_prompt = str(a.get("custom_prompt", s.custom_prompt)).strip()
     s.max_reply_chars = int(a.get("max_reply_chars", s.max_reply_chars))
     s.history_turns = int(a.get("history_turns", s.history_turns))
+
+    raw_aliases = data.get("aliases", {})
+    if isinstance(raw_aliases, dict):
+        s.aliases = {str(k).strip(): str(v).strip() for k, v in raw_aliases.items() if str(k).strip() and str(v).strip()}
 
     stt = data.get("stt", {})
     s.stt_order = stt.get("provider_order", s.stt_order)
@@ -211,8 +220,16 @@ def render_config(s: Settings) -> str:
     lines.append(f"always_on_top = {'true' if s.always_on_top else 'false'}")
     lines.append(f"terminal = {_toml_str(s.terminal)}")
     lines.append(f"hotkey = {_toml_str(s.hotkey)}")
+    lines.append(f"active_model = {_toml_str(s.active_model)}")
+    lines.append(f"custom_prompt = {_toml_str(s.custom_prompt)}")
     lines.append(f"max_reply_chars = {s.max_reply_chars}")
     lines.append(f"history_turns = {s.history_turns}\n")
+
+    if s.aliases:
+        lines.append("[aliases]")
+        for k, v in s.aliases.items():
+            lines.append(f"{_toml_str(k)} = {_toml_str(v)}")
+        lines.append("")
 
     lines.append("[stt]")
     lines.append(f"provider_order = {_toml_list(s.stt_order)}")

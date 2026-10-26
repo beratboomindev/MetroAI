@@ -76,11 +76,14 @@ class Agent:
 
     # ---------- LLM çıktısı ----------
     def _system(self) -> str:
-        return SYSTEM_PROMPT.format(
+        base = SYSTEM_PROMPT.format(
             name=self.s.name,
             date=datetime.now().strftime("%d.%m.%Y %H:%M"),
             tools=tools.spec_text(),
         )
+        if self.s.custom_prompt:
+            base += f"\nKULLANICI ÖZEL TALİMATI:\n{self.s.custom_prompt}\n"
+        return base
 
     def _handle_json(self, raw: str) -> str:
         payload = extract_json(raw)
@@ -127,7 +130,7 @@ class Agent:
         if has("pil durumu", "batarya", "sarj ne kadar"):
             return tools.system_info({"what": "battery"}, self.ctx)
         if has("api bagla", "provider bagla", "api cek", "saglayici bagla", "modelleri cek"):
-            return "Provider ve API bağlama menüsünü açıyorum. Metro Code penceresinden seçebilir veya /api yazabilirsin."
+            return "Provider ve API bağlama menüsünü açıyorum. Metro Assistant penceresinden seçebilir veya /api yazabilirsin."
         msp = re.match(
             r"^(?:hey\s+metro\s+)?spotify(?:da|dan|'da|'dan)?\s+(.+?)\s+(?:sarkisini\s+|parcasini\s+)?(?:cal|ac|baslat|oynat)[\s!.,]*$",
             t,

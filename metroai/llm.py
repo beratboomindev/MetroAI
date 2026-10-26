@@ -148,6 +148,9 @@ class LLMChain:
 
     def candidates(self) -> list[tuple[Provider, str]]:
         out: list[tuple[Provider, str]] = []
+        pinned_target = (self.s.active_model or "").strip()
+        pinned_pair: tuple[Provider, str] | None = None
+
         for p in self.s.providers:
             if not p.usable():
                 continue
@@ -166,10 +169,33 @@ class LLMChain:
                     else:
                         models = discovered[:6]
             for m in models:
+                full_key = f"{p.id}/{m}"
+                if pinned_target and (
+                    pinned_target == full_key
+                    or pinned_target == m
+                    or (p.id == "opencode" and f"opencode/{pinned_target}" == m)
+                ):
+                    pinned_pair = (p, m)
                 if self._cooling(p.id, m):
                     continue
                 out.append((p, m))
+
+        # Kullanıcı elle bir model seçtiyse fakat listede yoksa yine de sağlayıcıyı bulup en başa ekle
+        if pinned_target and pinned_pair is None and "/" in pinned_target:
+            pid, mid = pinned_target.split("/", 1)
+            for p in self.s.providers:
+                if p.id == pid and p.usable():
+                    cand_model = pinned_target if pid == "opencode" else mid
+                    pinned_pair = (p, cand_model)
+                    break
+
+        if pinned_pair is not None:
+            out = [pinned_pair] + [ item for item in out if not (item[0].id == pinned_pair[0].id and item[1] == pinned_pair[1]) ]
         return out
+
+    def reset_cooldowns(self) -> None:
+        self.cooldowns.clear()
+        _save_json(COOLDOWN_FILE, self.cooldowns)
 
     # ---------- bekleme süreleri ----------
     @staticmethod
