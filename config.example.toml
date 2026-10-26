@@ -13,9 +13,12 @@ ack_phrase = ""
 chime = true
 # Tehlikeli işlemlerde (shell, kapatma) sesli onay ister.
 confirm_dangerous = true
-# "Hey Metro" denildiğinde Metro Assistant etkileşimli penceresini otomatik açar.
+# "Hey Metro" denildiğinde Metro Assistant etkileşimli penceresini otomatik açar ve her zaman üstte tutar.
 auto_open_terminal = true
+always_on_top = true
 terminal = "auto"
+# Konuşmak için kısayol tuşu (örn. "F8", "F9", "ALT+M" — boş bırakırsan sadece sesle uyanır).
+hotkey = ""
 max_reply_chars = 500
 history_turns = 6
 

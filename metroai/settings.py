@@ -45,7 +45,9 @@ class Settings:
     chime: bool = True
     confirm_dangerous: bool = True
     auto_open_terminal: bool = True
+    always_on_top: bool = True
     terminal: str = "auto"
+    hotkey: str = ""
     max_reply_chars: int = 500
     history_turns: int = 6
     providers: list[Provider] = field(default_factory=list)
@@ -137,7 +139,9 @@ def load() -> Settings:
     s.chime = bool(a.get("chime", s.chime))
     s.confirm_dangerous = bool(a.get("confirm_dangerous", s.confirm_dangerous))
     s.auto_open_terminal = bool(a.get("auto_open_terminal", s.auto_open_terminal))
+    s.always_on_top = bool(a.get("always_on_top", s.always_on_top))
     s.terminal = str(a.get("terminal", s.terminal))
+    s.hotkey = str(a.get("hotkey", s.hotkey)).strip()
     s.max_reply_chars = int(a.get("max_reply_chars", s.max_reply_chars))
     s.history_turns = int(a.get("history_turns", s.history_turns))
 
@@ -204,7 +208,9 @@ def render_config(s: Settings) -> str:
     lines.append(f"chime = {'true' if s.chime else 'false'}")
     lines.append(f"confirm_dangerous = {'true' if s.confirm_dangerous else 'false'}")
     lines.append(f"auto_open_terminal = {'true' if s.auto_open_terminal else 'false'}")
+    lines.append(f"always_on_top = {'true' if s.always_on_top else 'false'}")
     lines.append(f"terminal = {_toml_str(s.terminal)}")
+    lines.append(f"hotkey = {_toml_str(s.hotkey)}")
     lines.append(f"max_reply_chars = {s.max_reply_chars}")
     lines.append(f"history_turns = {s.history_turns}\n")
 

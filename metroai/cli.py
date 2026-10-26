@@ -13,7 +13,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__, audio, log, tools, tts
+from . import __version__, audio, keys, log, tools, tts
 from .agent import Agent
 from .settings import (
     CACHE_DIR,
@@ -81,7 +81,14 @@ def cmd_setup(args) -> int:
 
     for p in s.providers:
         if p.keyless:
-            _info(f"{p.id}: anahtarsız çalışıyor, atlandı")
+            if p.id == "opencode":
+                from . import tui
+                if not tui.is_opencode_installed():
+                    tui.ensure_opencode_installed(interactive=True)
+                else:
+                    _ok("opencode: sistemde kurulu ve ücretsiz modeller hazır")
+            else:
+                _info(f"{p.id}: anahtarsız çalışıyor, atlandı")
             continue
         existing = p.api_key or ""
         if args.groq and p.id == "groq":
@@ -128,6 +135,9 @@ def cmd_setup(args) -> int:
     s.wake_words = [w.strip().lower() for w in words.split(",") if w.strip()] or ["metro"]
 
     s.ack_phrase = _ask("Uyandıktan sonra kısa onay cümlesi (boş = sadece çan sesi)", s.ack_phrase)
+
+    from . import tui
+    tui.prompt_hotkey_setup(s)
 
     if not vosk_path(s).exists():
         print("\nTürkçe uyandırma modeli indiriliyor (~50 MB)...")

@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import sounddevice as sd
 
-from . import log
+from . import keys, log
 
 log_ = log.get()
 
@@ -52,6 +52,7 @@ class Mic:
         self.device = resolve_device(device)
         self.frame_samples = int(samplerate * FRAME_MS / 1000)
         self.stream: sd.RawInputStream | None = None
+        self.last_cancelled: bool = False
 
     def open(self) -> None:
         if self.stream is not None:
@@ -111,8 +112,11 @@ class Mic:
         start_timeout: float = 5.5,
         noise_multiplier: float = 1.8,
     ) -> np.ndarray | None:
-        """Konuşma başlayınca kaydeder, sessizlikte durur (farklı ses seviyelerine uyumlu)."""
+        """Konuşma başlayınca kaydeder, sessizlikte durur. ESC tuşuna basılırsa anında iptal eder."""
         self.open()
+        self.last_cancelled = False
+        watcher = keys.get_watcher()
+        watcher.clear_esc()
         threshold = min(460.0, max(125.0, noise_floor * noise_multiplier))
         pre_roll: list[np.ndarray] = []
         pre_roll_max = int(0.45 * 1000 / FRAME_MS)
@@ -127,6 +131,11 @@ class Mic:
         started_at = time.monotonic()
 
         while len(collected) < max_frames:
+            if watcher.is_esc_pressed():
+                log_.info("Dinleme ESC ile iptal edildi.")
+                self.last_cancelled = True
+                return None
+
             frame = self.read()
             level = rms(frame)
 
@@ -189,6 +198,20 @@ def chime(samplerate: int = 16000) -> None:
         sd.wait()
     except Exception as e:  # ses aygıtı yoksa sessizce geç
         log_.debug("chime çalınamadı: %s", e)
+
+
+def cancel_chime(samplerate: int = 16000) -> None:
+    """ESC ile iptal edildiğinde kısa alçalan 'bip' sesi."""
+    try:
+        t1 = np.linspace(0, 0.09, int(samplerate * 0.09), endpoint=False)
+        t2 = np.linspace(0, 0.11, int(samplerate * 0.11), endpoint=False)
+        a = 0.18 * np.sin(2 * np.pi * 660 * t1)
+        b = 0.18 * np.linspace(1, 0, len(t2)) ** 1.5 * np.sin(2 * np.pi * 440 * t2)
+        wave_ = np.concatenate([a, b, np.zeros(int(samplerate * 0.02))]).astype(np.float32)
+        sd.play(wave_, samplerate)
+        sd.wait()
+    except Exception:
+        pass
 
 
 def play_file(path: Path) -> bool:

@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 
 from . import agent as agent_mod
-from . import audio, log, tools, tts, tui
+from . import audio, keys, log, tools, tts, tui
 from .llm import LLMChain
 from .settings import CACHE_DIR, STATE_DIR, Settings, ensure_dirs, load, vosk_path
 from .stt import Stt
@@ -34,6 +34,7 @@ class Runtime(tools.Ctx):
         self.stt = Stt(settings, local=self.wake)
         self.chain = LLMChain(settings)
         self.agent = agent_mod.Agent(settings, self.chain, self)
+        self.keys = keys.get_watcher(settings.hotkey)
         self.noise_floor = 80.0
 
     # ---------- tools.Ctx ----------
@@ -112,10 +113,10 @@ class Runtime(tools.Ctx):
             elif lvl < self.noise_floor * 1.4:
                 self.noise_floor = min(220.0, 0.995 * self.noise_floor + 0.005 * lvl)
 
-            if not self.wake.feed(frame):
+            if not (self.keys.consume_wake() or self.wake.feed(frame)):
                 continue
 
-            log_.info("uyandırma kelimesi algılandı")
+            log_.info("uyandırma tetiklendi (ses veya kısayol tuşu)")
             self._on_wake()
 
         self.mic.close()
@@ -129,7 +130,10 @@ class Runtime(tools.Ctx):
                 latest = load()
                 self.s.voice = latest.voice
                 self.s.auto_open_terminal = latest.auto_open_terminal
+                self.s.always_on_top = latest.always_on_top
                 self.s.terminal = latest.terminal
+                self.s.hotkey = latest.hotkey
+                self.keys.set_hotkey(latest.hotkey)
             except Exception:
                 pass
 
@@ -162,7 +166,12 @@ class Runtime(tools.Ctx):
                 noise_multiplier=self.s.noise_multiplier,
             )
             if samples is None:
-                log_.info("komut gelmedi")
+                if self.mic.last_cancelled:
+                    audio.cancel_chime(self.s.sample_rate)
+                    tui.emit_event("cancelled", origin="daemon")
+                    log_.info("dinleme ESC ile iptal edildi")
+                else:
+                    log_.info("komut gelmedi")
                 self._set_state("dinliyor")
                 return
 
