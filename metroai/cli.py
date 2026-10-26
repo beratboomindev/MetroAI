@@ -275,7 +275,9 @@ class CLICtx(tools.Ctx):
         if self.speak and self.s:
             tts.speak(text, self.s.voice, self.s.language)
 
-    def confirm(self, question: str) -> bool:
+    def confirm(self, question: str, detail: str = "") -> bool:
+        if detail:
+            print(f"\n  Komut: {detail}")
         return _ask(f"{question} (e/h)", "h").lower().startswith(("e", "y"))
 
     def sleep_minutes(self, minutes: float) -> None:

@@ -21,7 +21,7 @@ NOTES = STATE_DIR / "notes.md"
 
 
 class Ctx(Protocol):
-    def confirm(self, question: str) -> bool: ...
+    def confirm(self, question: str, detail: str = "") -> bool: ...
     def say(self, text: str) -> None: ...
     def sleep_minutes(self, minutes: float) -> None: ...
 
@@ -570,15 +570,17 @@ def shell(args: dict, ctx: Ctx) -> str:
         return "Komut boş."
     if _FORBIDDEN_PAT.search(cmd):
         return "Bu komut sisteme kalıcı zarar verebileceği için güvenlik kilidi tarafından engellendi."
-    if not ctx.confirm(f"Şu komutu çalıştırmamı onaylıyor musun? {cmd[:120]}"):
+    if not ctx.confirm("Şu komutu çalıştırayım mı?", detail=cmd):
         return "Komutu iptal ettim."
     rc, out = _run(["bash", "-lc", cmd], timeout=60)
     out = out.strip().replace("\n", " ")
-    if len(out) > 300:
-        out = out[:300] + "…"
+    if len(out) > 240:
+        out = out[:240] + "…"
     if rc == 0:
-        return out or "Komut tamamlandı."
-    return f"Komut hata verdi: {out[:200]}"
+        if not out or out.startswith("/"):
+            return "Tamam, komutu çalıştırdım."
+        return out
+    return f"Komut hata verdi: {out[:180]}"
 
 
 @tool(

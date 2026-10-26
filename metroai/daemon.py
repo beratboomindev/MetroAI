@@ -16,9 +16,10 @@ from .wake import WakeWord
 
 log_ = log.get()
 STATUS_FILE = STATE_DIR / "status"
+CONFIRM_FILE = STATE_DIR / "confirm_reply"
 
-YES = ("evet", "onay", "tamam", "olur", "yap", "kabul", "tabii", "aynen", "dogru", "he")
-NO = ("hayir", "vazgec", "iptal", "yok", "olmaz", "yapma", "dur")
+YES = ("evet", "onay", "tamam", "olur", "yap", "kabul", "tabii", "aynen", "dogru", "he", "calistir", "çalıştır")
+NO = ("hayir", "hayır", "vazgec", "vazgeç", "iptal", "yok", "olmaz", "yapma", "dur")
 
 
 class Runtime(tools.Ctx):
@@ -50,23 +51,66 @@ class Runtime(tools.Ctx):
             self.wake.reset()
         self._set_state("uykuda" if time.time() < self.paused_until else "dinliyor")
 
-    def confirm(self, question: str) -> bool:
+    def _consume_screen_confirm(self) -> bool | None:
+        if not CONFIRM_FILE.exists():
+            return None
+        try:
+            val = CONFIRM_FILE.read_text(encoding="utf-8").strip().lower()
+            CONFIRM_FILE.unlink(missing_ok=True)
+            if val == "yes":
+                return True
+            if val == "no":
+                return False
+        except Exception:
+            pass
+        return None
+
+    def confirm(self, question: str, detail: str = "") -> bool:
+        try:
+            CONFIRM_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        self._set_state("onay bekliyor")
+        tui.ensure_terminal_open(self.s)
+        tui.emit_event("confirm_request", origin="daemon", question=question, detail=detail)
+
+        # Yalnızca kısa onay sorusunu sesli oku (komutun kendisini sesli okuma)
         self.say(question)
         self._set_state("onay bekliyor")
+
+        screen_ans = self._consume_screen_confirm()
+        if screen_ans is not None:
+            tui.emit_event("confirm_resolved", origin="daemon", approved=screen_ans, via="ekran")
+            return screen_ans
+
         samples = self.mic.record_command(
-            noise_floor=self.noise_floor, silence_sec=0.7, max_sec=8, start_timeout=6
+            noise_floor=self.noise_floor, silence_sec=0.75, max_sec=10, start_timeout=8
         )
+
+        screen_ans = self._consume_screen_confirm()
+        if screen_ans is not None:
+            tui.emit_event("confirm_resolved", origin="daemon", approved=screen_ans, via="ekran")
+            return screen_ans
+
         if samples is None:
-            self.say("Onay alamadım, iptal ediyorum.")
+            tui.emit_event("confirm_resolved", origin="daemon", approved=False, via="iptal")
+            if self.mic.last_cancelled:
+                audio.cancel_chime(self.s.sample_rate)
+            else:
+                self.say("Onay alamadım, iptal ediyorum.")
             return False
+
         text, _ = self.stt.transcribe(audio.to_wav_bytes(samples, self.s.sample_rate))
         low = text.lower()
         log_.info("onay yanıtı: %r", low)
         if any(w in low for w in NO):
+            tui.emit_event("confirm_resolved", origin="daemon", approved=False, via="ses")
             self.say("Tamam, iptal.")
             return False
         if any(w in low for w in YES):
+            tui.emit_event("confirm_resolved", origin="daemon", approved=True, via="ses")
             return True
+        tui.emit_event("confirm_resolved", origin="daemon", approved=False, via="ses")
         self.say("Net anlayamadım, iptal ediyorum.")
         return False
 

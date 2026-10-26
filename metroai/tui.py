@@ -25,6 +25,7 @@ TUI_PID_FILE = STATE_DIR / "tui.pid"
 STATUS_FILE = STATE_DIR / "status"
 HISTORY_FILE = STATE_DIR / "chat_history"
 ONBOARDED_FILE = STATE_DIR / "api_onboarded"
+CONFIRM_FILE = STATE_DIR / "confirm_reply"
 
 PROVIDER_META: dict[str, tuple[str, str]] = {
     "opencode": ("OpenCode Ücretsiz Modeller (Zen / CLI)", "https://opencode.ai/zen"),
@@ -386,10 +387,20 @@ class TUICtx(tools.Ctx):
         if self.tui.speak_replies:
             tts.speak(text, self.tui.s.voice, self.tui.s.language, self.tui.s.max_reply_chars)
 
-    def confirm(self, question: str) -> bool:
+    def confirm(self, question: str, detail: str = "") -> bool:
+        if detail:
+            print(f"\n  {YELLOW}{BOLD}⚠ ONAY GEREKLİ — {question}{RESET}")
+            for line in detail.splitlines()[:12]:
+                print(f"    {GRAY}${RESET} {WHITE}{line}{RESET}")
+        if self.tui.speak_replies:
+            threading.Thread(
+                target=tts.speak,
+                args=(question, self.tui.s.voice, self.tui.s.language, self.tui.s.max_reply_chars),
+                daemon=True,
+            ).start()
         try:
-            ans = input(f"\n  {YELLOW}⚠ {question} (e/h): {RESET}").strip().lower()
-            return ans.startswith(("e", "y", "o"))
+            ans = input(f"\n  {ORANGE}{BOLD}👉 {question} [E]vet / [H]ayır (e/h): {RESET}").strip().lower()
+            return ans.startswith(("e", "y", "o", "t", "1"))
         except (EOFError, KeyboardInterrupt):
             return False
 
@@ -411,6 +422,7 @@ class MetroAssistantTUI:
         self._print_lock = threading.Lock()
         self._in_prompt = False
         self._status_override: str | None = None
+        self._awaiting_daemon_confirm = False
 
     # ---------- Görsel Yardımcılar (Asla Kaymayan / Taşmayan Responsive Kutu) ----------
     def _box_width(self) -> int:
@@ -513,7 +525,10 @@ class MetroAssistantTUI:
                 sys.stdout.write("\r\033[K")
             sys.stdout.write(block + "\n")
             if self._in_prompt:
-                sys.stdout.write(f"{CYAN}{BOLD}metro ❯{RESET} ")
+                if self._awaiting_daemon_confirm:
+                    sys.stdout.write(f"  {ORANGE}{BOLD}👉 Onaylıyor musun? [E]vet / [H]ayır (e/h): {RESET}")
+                else:
+                    sys.stdout.write(f"{CYAN}{BOLD}metro ❯{RESET} ")
                 try:
                     sys.stdout.write(readline.get_line_buffer())
                 except Exception:
@@ -587,6 +602,27 @@ class MetroAssistantTUI:
             self._status_override = "düşünüyor"
             self._set_window_title("düşünüyor")
             self.print_system("Düşünüyor...")
+        elif etype == "confirm_request":
+            self._awaiting_daemon_confirm = True
+            self._status_override = "onay bekliyor"
+            self._set_window_title("onay bekliyor")
+            q = ev.get("question", "Şu komutu çalıştırayım mı?")
+            detail = ev.get("detail", "")
+            lines = [f"\n  {YELLOW}{BOLD}⚠ ONAY GEREKLİ — {q}{RESET}"]
+            if detail:
+                for dl in detail.splitlines()[:12]:
+                    lines.append(f"    {GRAY}${RESET} {WHITE}{dl}{RESET}")
+            lines.append(f"  {GRAY}(Sesle 'Evet / Hayır' diyebilir veya aşağıya e / h yazıp Enter'a basabilirsin){RESET}")
+            self._async_print("\n".join(lines))
+        elif etype == "confirm_resolved":
+            self._awaiting_daemon_confirm = False
+            self._status_override = "hazır"
+            self._set_window_title("hazır")
+            approved = bool(ev.get("approved"))
+            if approved:
+                self.print_system(f"{GREEN}✓ Onaylandı, komut çalıştırılıyor...{RESET}")
+            else:
+                self.print_system(f"{YELLOW}✗ Komut iptal edildi.{RESET}")
         elif etype == "assistant":
             self._status_override = "hazır"
             self._set_window_title("hazır")
@@ -1337,6 +1373,20 @@ class MetroAssistantTUI:
 
                 if not user_in:
                     continue
+
+                low_in = user_in.lower().strip()
+                daemon_st = STATUS_FILE.read_text(encoding="utf-8").strip() if STATUS_FILE.exists() else ""
+                if self._awaiting_daemon_confirm or daemon_st == "onay bekliyor":
+                    if low_in in ("e", "evet", "y", "yes", "onay", "tamam", "olur", "calistir", "çalıştır", "1"):
+                        self._awaiting_daemon_confirm = False
+                        CONFIRM_FILE.write_text("yes", encoding="utf-8")
+                        keys.trigger_cancel()
+                        continue
+                    if low_in in ("h", "hayir", "hayır", "n", "no", "iptal", "vazgec", "vazgeç", "0"):
+                        self._awaiting_daemon_confirm = False
+                        CONFIRM_FILE.write_text("no", encoding="utf-8")
+                        keys.trigger_cancel()
+                        continue
 
                 if user_in.startswith("/"):
                     try:
