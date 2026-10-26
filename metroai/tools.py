@@ -553,24 +553,25 @@ def sleep_tool(args: dict, ctx: Ctx) -> str:
     return f"{minutes:g} dakika dinleniyorum."
 
 
-_DESTRUCTIVE_PAT = re.compile(
-    r"\b(rm\s+-r|rm\s+-f|mkfs|dd\s+if=|shutdown|reboot|poweroff|pacman\s+-R|chmod\s+-R\s+000|:>\s*/)\b"
+_FORBIDDEN_PAT = re.compile(
+    r"(rm\s+-[rf]+\s+/(?:\s|$|\*)|mkfs\.|dd\s+if=.*of=/dev/sd|dd\s+if=.*of=/dev/nvme|:\(\)\{.*\})"
 )
 
 
 @tool(
     "shell",
-    "Linux kabuğunda sistem komutu çalıştırır (tam sistem erişimi)",
+    "Linux kabuğunda komut çalıştırır (her zaman onay ister)",
     {"command": "çalıştırılacak bash komutu"},
-    dangerous=False,
+    dangerous=True,
 )
 def shell(args: dict, ctx: Ctx) -> str:
     cmd = str(args.get("command", "")).strip()
     if not cmd:
         return "Komut boş."
-    if _DESTRUCTIVE_PAT.search(cmd):
-        if not ctx.confirm(f"Bu kritik komutu çalıştırmamı onaylıyor musun? {cmd[:120]}"):
-            return "Komutu iptal ettim."
+    if _FORBIDDEN_PAT.search(cmd):
+        return "Bu komut sisteme kalıcı zarar verebileceği için güvenlik kilidi tarafından engellendi."
+    if not ctx.confirm(f"Şu komutu çalıştırmamı onaylıyor musun? {cmd[:120]}"):
+        return "Komutu iptal ettim."
     rc, out = _run(["bash", "-lc", cmd], timeout=60)
     out = out.strip().replace("\n", " ")
     if len(out) > 300:
@@ -582,7 +583,7 @@ def shell(args: dict, ctx: Ctx) -> str:
 
 @tool(
     "power",
-    "Bilgisayarı kapatır, yeniden başlatır veya uyutur (onay ister)",
+    "Bilgisayarı kapatır, yeniden başlatır veya uyutur (her zaman onay ister)",
     {"action": "shutdown|reboot|suspend"},
     dangerous=True,
 )
@@ -591,6 +592,8 @@ def power(args: dict, ctx: Ctx) -> str:
     name = {"shutdown": "kapatmamı", "reboot": "yeniden başlatmamı", "suspend": "uyutmamı"}.get(action)
     if not name:
         return "Geçersiz güç komutu."
+    if not ctx.confirm(f"Bilgisayarı {name} onaylıyor musun?"):
+        return "İptal ettim."
     cmd = {"shutdown": ["systemctl", "poweroff"], "reboot": ["systemctl", "reboot"],
            "suspend": ["systemctl", "suspend"]}[action]
     _spawn(cmd)

@@ -101,7 +101,7 @@ class Agent:
         t = tools.TOOLS[name]
         log_.info("araç: %s %s", name, args)
         try:
-            if t.dangerous and self.s.confirm_dangerous:
+            if t.dangerous and self.s.confirm_dangerous and name not in ("shell", "power"):
                 if not self.ctx.confirm(f"{name} işlemini onaylıyor musun?"):
                     return "İptal ettim."
             return t.fn(args, self.ctx)
