@@ -112,11 +112,11 @@ def cmd_setup(args) -> int:
         return 0
 
     voice_choice = _ask(
-        "Ses [1=jarvis (tok erkek - önerilen), 2=brian (modern erkek), 3=seraphina (doğal kadın), 4=emel (klasik kadın), 5=değiştirme]",
+        "Ses [1=metro (tok erkek - önerilen), 2=brian (modern erkek), 3=seraphina (doğal kadın), 4=emel (klasik kadın), 5=değiştirme]",
         "1",
     )
     if voice_choice == "1":
-        s.voice = "jarvis"
+        s.voice = "metro"
     elif voice_choice == "2":
         s.voice = "brian"
     elif voice_choice == "3":
@@ -289,7 +289,7 @@ def cmd_voices(args) -> int:
         s.voice = preset.alias
         save(s)
         _ok(f"Varsayılan ses '{preset.alias}' ({preset.desc}) olarak kaydedildi.")
-        tts.speak("Merhaba patron, ben Metro. Yeni sesimle emrindeyim.", s.voice, s.language)
+        tts.speak("Merhaba, ben Metro. Yeni sesimle hazırım.", s.voice, s.language)
         return 0
 
     print(f"\nMetro ses profilleri (aktif: \033[36m{s.voice}\033[0m):\n")
@@ -298,9 +298,9 @@ def cmd_voices(args) -> int:
             mark = "\033[32m●\033[0m" if alias == s.voice.lower() else " "
             print(f"  {mark} \033[1m{alias:<15}\033[0m {gender:<7} {desc}")
         print("\nSesi değiştirmek ve test etmek için:")
-        print("  ./metro voices --set jarvis")
-        print("  ./metro voices --set brian")
-        print("  ./metro voices --set seraphina")
+        print("  metro voices --set metro")
+        print("  metro voices --set brian")
+        print("  metro voices --set seraphina")
     except Exception as e:
         print(f"  liste alınamadı: {e}")
     return 0
@@ -312,7 +312,7 @@ def cmd_chat(args) -> int:
     if getattr(args, "window", False):
         ok = tui.ensure_terminal_open(load())
         return 0 if ok else 1
-    app = tui.MetroCodeTUI(speak_replies=getattr(args, "speak", False))
+    app = tui.MetroAssistantTUI(speak_replies=getattr(args, "speak", False))
     return app.run()
 
 
@@ -507,10 +507,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     v = sub.add_parser("voices", help="TTS seslerini listele veya değiştir")
     v.add_argument("--lang", default="tr")
-    v.add_argument("--set", dest="set_voice", metavar="SES", help="aktif sesi değiştir ve test et (örn. jarvis, brian, seraphina)")
+    v.add_argument("--set", dest="set_voice", metavar="SES", help="aktif sesi değiştir ve test et (örn. metro, brian, seraphina)")
     v.set_defaults(func=cmd_voices)
 
-    ch = sub.add_parser("chat", aliases=["code", "tui"], help="Claude Code / Jarvis tarzı etkileşimli sohbet konsolunu aç")
+    ch = sub.add_parser("chat", aliases=["assistant", "tui"], help="Metro Assistant etkileşimli sohbet konsolunu aç")
     ch.add_argument("-s", "--speak", action="store_true", help="yazılı yanıtları da seslendir")
     ch.add_argument("-w", "--window", action="store_true", help="yeni bir terminal penceresinde aç")
     ch.set_defaults(func=cmd_chat)

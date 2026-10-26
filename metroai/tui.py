@@ -1,4 +1,4 @@
-"""Metro Code — Claude Code & J.A.R.V.I.S. tarzı etkileşimli terminal arayüzü."""
+"""Metro Assistant — Etkileşimli Sesli ve Yazılı Terminal Arayüzü."""
 from __future__ import annotations
 
 import json
@@ -50,17 +50,17 @@ def mark_api_onboarded() -> None:
     except Exception:
         pass
 
-# ANSI renk kodları (Claude Code & Jarvis paleti)
+# ANSI renk kodları (Metro Assistant profesyonel paleti)
 RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
 ITALIC = "\033[3m"
-CYAN = "\033[38;5;81m"
-ORANGE = "\033[38;5;209m"
+CYAN = "\033[38;5;75m"
+ORANGE = "\033[38;5;39m"
 GREEN = "\033[38;5;114m"
 YELLOW = "\033[38;5;221m"
 RED = "\033[38;5;203m"
-GRAY = "\033[38;5;245m"
+GRAY = "\033[38;5;244m"
 WHITE = "\033[38;5;255m"
 
 
@@ -141,7 +141,7 @@ def _desktop_env() -> dict[str, str]:
 
 
 def ensure_terminal_open(settings: Settings | None = None) -> bool:
-    """Açık bir Metro Code penceresi yoksa yeni bir terminal penceresi açar."""
+    """Açık bir Metro Assistant penceresi yoksa yeni bir terminal penceresi açar."""
     if is_tui_running():
         return True
 
@@ -150,13 +150,13 @@ def ensure_terminal_open(settings: Settings | None = None) -> bool:
         return False
 
     metro_bin = str(ROOT / "metro")
-    title = "Metro Code — J.A.R.V.I.S."
+    title = "Metro Assistant"
 
     candidates: list[tuple[str, list[str]]] = [
-        ("kitty", ["kitty", "--title", title, "--app-id", "metro-code", metro_bin, "chat"]),
+        ("kitty", ["kitty", "--title", title, "--app-id", "metro-assistant", metro_bin, "chat"]),
         ("konsole", ["konsole", "-p", f"tabtitle={title}", "-e", metro_bin, "chat"]),
-        ("alacritty", ["alacritty", "--title", title, "--class", "metro-code", "-e", metro_bin, "chat"]),
-        ("foot", ["foot", f"--title={title}", "--app-id=metro-code", metro_bin, "chat"]),
+        ("alacritty", ["alacritty", "--title", title, "--class", "metro-assistant", "-e", metro_bin, "chat"]),
+        ("foot", ["foot", f"--title={title}", "--app-id=metro-assistant", metro_bin, "chat"]),
         ("ghostty", ["ghostty", f"--title={title}", "-e", metro_bin, "chat"]),
         ("wezterm", ["wezterm", "start", "--", metro_bin, "chat"]),
         ("xterm", ["xterm", "-T", title, "-e", metro_bin, "chat"]),
@@ -178,16 +178,16 @@ def ensure_terminal_open(settings: Settings | None = None) -> bool:
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            log_.info("Metro Code terminali başlatıldı (%s)", name)
+            log_.info("Metro Assistant terminali başlatıldı (%s)", name)
             return True
         except Exception as e:
             log_.warning("terminal başlatılamadı (%s): %s", name, e)
     return False
 
 
-# ---------- Claude Code / Jarvis TUI Konsolu ----------
+# ---------- Metro Assistant Konsolu ----------
 class TUICtx(tools.Ctx):
-    def __init__(self, tui: "MetroCodeTUI"):
+    def __init__(self, tui: "MetroAssistantTUI"):
         self.tui = tui
 
     def say(self, text: str) -> None:
@@ -205,7 +205,7 @@ class TUICtx(tools.Ctx):
         self.tui.print_system(f"Metro {minutes:g} dakika sessize alındı.")
 
 
-class MetroCodeTUI:
+class MetroAssistantTUI:
     def __init__(self, speak_replies: bool = False):
         ensure_dirs()
         self.s = load()
@@ -221,7 +221,7 @@ class MetroCodeTUI:
 
     # ---------- Görsel Yardımcılar ----------
     def _term_width(self) -> int:
-        return max(56, min(92, shutil.get_terminal_size((80, 24)).columns - 2))
+        return max(60, min(90, shutil.get_terminal_size((80, 24)).columns - 2))
 
     def render_header(self) -> None:
         w = self._term_width()
@@ -233,33 +233,41 @@ class MetroCodeTUI:
 
         def pad(visible_len: int, text: str) -> str:
             spaces = max(0, inner - visible_len)
-            return f"{CYAN}│{RESET} {text}{' ' * spaces} {CYAN}│{RESET}"
+            return f"{GRAY}│{RESET} {text}{' ' * spaces} {GRAY}│{RESET}"
 
-        title_vis = f"✻ Metro Code v{__version__}  •  J.A.R.V.I.S. Sesli & Yazılı Konsol"
-        title_col = f"{ORANGE}{BOLD}✻ Metro Code{RESET} {GRAY}v{__version__}  •  J.A.R.V.I.S. Sesli & Yazılı Konsol{RESET}"
-
-        voice_vis = f"Ses: {preset.alias} ({preset.gender})  •  Sağlayıcılar: {providers_str}"
-        voice_col = (
-            f"{GRAY}Ses:{RESET} {WHITE}{preset.alias}{RESET} {GRAY}({preset.gender})  •  "
-            f"Sağlayıcılar:{RESET} {GREEN}{providers_str}{RESET}"
+        left_vis = f"◆ METRO ASSISTANT  v{__version__}"
+        right_vis = f"● {daemon_state.upper()}"
+        gap = max(2, inner - len(left_vis) - len(right_vis))
+        top_line = (
+            f"{CYAN}{BOLD}◆ METRO ASSISTANT{RESET}  {GRAY}v{__version__}{RESET}"
+            f"{' ' * gap}{GREEN}{BOLD}● {daemon_state.upper()}{RESET}"
         )
 
-        mode_str = "AÇIK" if self.speak_replies else "SADECE SESLİ KOMUTTA"
-        status_vis = f"Durum: ● {daemon_state.upper()}  •  Sesli Okuma: {mode_str}"
-        status_col = (
-            f"{GRAY}Durum:{RESET} {GREEN}● {daemon_state.upper()}{RESET}  {GRAY}•  "
-            f"Sesli Okuma:{RESET} {CYAN}{mode_str}{RESET}"
+        sep_line = f"{GRAY}{'─' * inner}{RESET}"
+
+        mode_str = "Açık" if self.speak_replies else "Yalnızca Sesli Komutta"
+        info1_vis = f"Ses Profili : {preset.alias} ({preset.gender})   •   Sesli Yanıt : {mode_str}"
+        info1_col = (
+            f"{GRAY}Ses Profili :{RESET} {WHITE}{preset.alias}{RESET} {GRAY}({preset.gender})   •   "
+            f"Sesli Yanıt :{RESET} {CYAN}{mode_str}{RESET}"
         )
 
-        hint_vis = "İpucu: 'Hey Metro' diyerek konuş veya aşağıya yaz (/help komutlar)"
-        hint_col = f"{DIM}{hint_vis}{RESET}"
+        info2_vis = f"Sağlayıcılar: {providers_str}"
+        info2_col = f"{GRAY}Sağlayıcılar:{RESET} {GREEN}{providers_str}{RESET}"
 
-        print(f"\n{CYAN}╭─{'─' * inner}─╮{RESET}")
-        print(pad(len(title_vis), title_col))
-        print(pad(len(voice_vis), voice_col))
-        print(pad(len(status_vis), status_col))
+        hint_vis = "Komutlar    : /api (sağlayıcı bağla) • /voice (ses) • /listen • /help"
+        hint_col = (
+            f"{GRAY}Komutlar    :{RESET} {WHITE}/api{RESET} {GRAY}(sağlayıcı bağla) •{RESET} "
+            f"{WHITE}/voice{RESET} {GRAY}(ses) •{RESET} {WHITE}/listen{RESET} {GRAY}•{RESET} {WHITE}/help{RESET}"
+        )
+
+        print(f"\n{GRAY}╭─{'─' * inner}─╮{RESET}")
+        print(pad(len(left_vis) + gap + len(right_vis), top_line))
+        print(pad(inner, sep_line))
+        print(pad(len(info1_vis), info1_col))
+        print(pad(len(info2_vis), info2_col))
         print(pad(len(hint_vis), hint_col))
-        print(f"{CYAN}╰─{'─' * inner}─╯{RESET}\n")
+        print(f"{GRAY}╰─{'─' * inner}─╯{RESET}\n")
 
     def _async_print(self, block: str) -> None:
         with self._print_lock:
@@ -267,7 +275,7 @@ class MetroCodeTUI:
                 sys.stdout.write("\r\033[K")
             sys.stdout.write(block + "\n")
             if self._in_prompt:
-                sys.stdout.write(f"{ORANGE}{BOLD}❯{RESET} ")
+                sys.stdout.write(f"{CYAN}{BOLD}metro ❯{RESET} ")
                 try:
                     sys.stdout.write(readline.get_line_buffer())
                 except Exception:
@@ -276,17 +284,17 @@ class MetroCodeTUI:
 
     def print_user_voice(self, text: str, source: str = "stt") -> None:
         self._async_print(
-            f"{CYAN}{BOLD}🎙 Sen ({source}):{RESET} {WHITE}{text}{RESET}"
+            f"{CYAN}{BOLD}● Sen ({source}):{RESET} {WHITE}{text}{RESET}"
         )
 
     def print_assistant(self, text: str, model: str | None = None) -> None:
         tag = f" {GRAY}[{model}]{RESET}" if model else ""
         self._async_print(
-            f"{ORANGE}{BOLD}⏺ Metro{RESET}{tag}\n  {WHITE}{text}{RESET}\n"
+            f"{ORANGE}{BOLD}◆ Metro{RESET}{tag}\n  {WHITE}{text}{RESET}\n"
         )
 
     def print_system(self, text: str) -> None:
-        self._async_print(f"  {GRAY}✻ {text}{RESET}")
+        self._async_print(f"  {GRAY}• {text}{RESET}")
 
     # ---------- Arka Plan Olay İzleyici (Daemon <-> TUI) ----------
     def _watch_events(self) -> None:
@@ -477,17 +485,17 @@ class MetroCodeTUI:
             return True
 
         if cmd == "/help":
-            print(f"\n  {BOLD}Metro Code Komutları:{RESET}")
+            print(f"\n  {BOLD}Metro Assistant Komutları:{RESET}")
             print(f"  {CYAN}/api{RESET}                Sağlayıcı (Provider) bağla ve API modellerini çek")
             print(f"  {CYAN}/pull{RESET}               Bağlı sağlayıcılardan güncel model listesini çek")
             print(f"  {CYAN}/voice{RESET}              Mevcut ses profillerini listele")
-            print(f"  {CYAN}/voice <ad>{RESET}         Sesi değiştir ve test et (örn. {WHITE}/voice jarvis{RESET}, {WHITE}/voice brian{RESET})")
+            print(f"  {CYAN}/voice <ad>{RESET}         Sesi değiştir ve test et (örn. {WHITE}/voice metro{RESET}, {WHITE}/voice brian{RESET})")
             print(f"  {CYAN}/speak{RESET}              Yazılı sohbette sesli okumayı aç/kapat")
             print(f"  {CYAN}/listen{RESET}             Mikrofondan hemen sesli komut dinle")
             print(f"  {CYAN}/model{RESET}              LLM model zinciri ve kota durumunu göster")
             print(f"  {CYAN}/sh <komut>{RESET}         Terminal komutu çalıştır")
             print(f"  {CYAN}/clear{RESET}              Ekranı ve sohbet geçmişini temizle")
-            print(f"  {CYAN}/exit{RESET}               Metro Code penceresini kapat\n")
+            print(f"  {CYAN}/exit{RESET}               Metro Assistant penceresini kapat\n")
             return True
 
         if cmd in ("/api", "/provider", "/providers", "/connect", "/setup"):
@@ -516,13 +524,13 @@ class MetroCodeTUI:
                 for alias, gender, desc in tts.voices():
                     mark = f"{GREEN}●{RESET}" if alias == self.s.voice.lower() else " "
                     print(f"  {mark} {CYAN}{alias:<15}{RESET} {GRAY}{gender:<6}{RESET} {desc}")
-                print(f"\n  Değiştirmek için: {WHITE}/voice jarvis{RESET} veya {WHITE}/voice brian{RESET}\n")
+                print(f"\n  Değiştirmek için: {WHITE}/voice metro{RESET} veya {WHITE}/voice brian{RESET}\n")
                 return True
             preset = tts.resolve_voice(arg)
             self.s.voice = preset.alias
             save(self.s)
             print(f"\n  {GREEN}✓{RESET} Ses {BOLD}{preset.alias}{RESET} ({preset.desc}) olarak ayarlandı. Test ediliyor...")
-            tts.speak("Merhaba patron, ben Metro. Yeni sesimle emrindeyim.", self.s.voice, self.s.language)
+            tts.speak("Merhaba, ben Metro. Yeni sesimle hazırım.", self.s.voice, self.s.language)
             print()
             return True
 
@@ -621,7 +629,7 @@ class MetroCodeTUI:
             while self.running:
                 try:
                     self._in_prompt = True
-                    user_in = input(f"{ORANGE}{BOLD}❯{RESET} ").strip()
+                    user_in = input(f"{CYAN}{BOLD}metro ❯{RESET} ").strip()
                     self._in_prompt = False
                 except EOFError:
                     print()
@@ -697,3 +705,6 @@ class MetroCodeTUI:
             except Exception:
                 pass
         return 0
+
+
+MetroCodeTUI = MetroAssistantTUI

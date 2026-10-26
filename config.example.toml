@@ -6,14 +6,14 @@ name = "Metro"
 # "hey metro" / "metro" / "hey metre" hepsi yakalanır (bulanık eşleşme).
 wake_words = ["metro"]
 language = "tr"
-# Ses profilleri: jarvis (tok erkek, önerilen) | brian | remy | seraphina | emma | emel (`./metro voices`)
-voice = "jarvis"
+# Ses profilleri: metro (tok erkek, önerilen) | brian | remy | seraphina | emma | emel (`metro voices`)
+voice = "metro"
 # Uyandıktan sonra söylenecek kısa cümle; boş bırakırsan sadece çan sesi çalar.
 ack_phrase = ""
 chime = true
 # Tehlikeli işlemlerde (shell, kapatma) sesli onay ister.
 confirm_dangerous = true
-# "Hey Metro" denildiğinde Claude Code / Jarvis tarzı etkileşimli terminal penceresini otomatik açar.
+# "Hey Metro" denildiğinde Metro Assistant etkileşimli penceresini otomatik açar.
 auto_open_terminal = true
 terminal = "auto"
 max_reply_chars = 500
@@ -29,10 +29,10 @@ vosk_model = "models/vosk-model-small-tr-0.3"
 # ./metro devices ile numarayı öğren; isim parçası da yazabilirsin ("Mic1").
 input_device = "default"
 sample_rate = 16000
-silence_sec = 0.9
+silence_sec = 0.85
 max_record_sec = 15.0
 # Gürültü eşiği çarpanı: düşük = daha hassas, yüksek = daha az yanlış tetikleme.
-noise_multiplier = 2.4
+noise_multiplier = 1.8
 
 # --- Sağlayıcılar: sırayla denenir, kota dolan model dinlenmeye alınır ---
 # En az birine anahtar gir. Boş anahtarlı sağlayıcılar atlanır.

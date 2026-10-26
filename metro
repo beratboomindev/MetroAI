@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Metro launcher
+# Metro Assistant başlatıcı
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 cd "$HERE"
 
 if [[ ! -x venv/bin/python ]]; then
-  echo "Python ortamı yok. Önce: ./install.sh" >&2
-  exit 1
+  echo "İlk çalıştırma algılandı — otomatik kurulum başlatılıyor..."
+  bash "$HERE/install.sh"
 fi
 
 exec venv/bin/python -m metroai "$@"

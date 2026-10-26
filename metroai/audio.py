@@ -93,28 +93,29 @@ class Mic:
             pass
 
     def calibrate(self, seconds: float = 0.6) -> float:
-        """Ortam gürültü seviyesini ölçer."""
+        """Ortam gürültü seviyesini ölçer (anlık seslerden etkilenmemek için alt çeyreği alır)."""
         self.open()
         vals = []
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             vals.append(rms(self.read()))
         vals.sort()
-        return vals[len(vals) // 2] if vals else 80.0
+        base = vals[len(vals) // 4] if vals else 70.0
+        return min(220.0, max(35.0, base))
 
     def record_command(
         self,
-        noise_floor: float = 80.0,
+        noise_floor: float = 70.0,
         silence_sec: float = 0.9,
         max_sec: float = 15.0,
-        start_timeout: float = 5.0,
-        noise_multiplier: float = 2.4,
+        start_timeout: float = 5.5,
+        noise_multiplier: float = 1.8,
     ) -> np.ndarray | None:
-        """Konuşma başlayınca kaydeder, sessizlikte durur."""
+        """Konuşma başlayınca kaydeder, sessizlikte durur (farklı ses seviyelerine uyumlu)."""
         self.open()
-        threshold = max(180.0, noise_floor * noise_multiplier)
+        threshold = min(460.0, max(125.0, noise_floor * noise_multiplier))
         pre_roll: list[np.ndarray] = []
-        pre_roll_max = int(0.4 * 1000 / FRAME_MS)
+        pre_roll_max = int(0.45 * 1000 / FRAME_MS)
         silence_frames_needed = int(silence_sec * 1000 / FRAME_MS)
         max_frames = int(max_sec * 1000 / FRAME_MS)
         start_frames_needed = 2
@@ -159,6 +160,13 @@ class Mic:
 
 
 def to_wav_bytes(samples: np.ndarray, samplerate: int = 16000) -> bytes:
+    # Kısık sesli veya uzaktaki konuşmacılar için otomatik ses seviyesi dengeleme (AGC)
+    if samples.size > 0:
+        f = samples.astype(np.float32)
+        peak = float(np.max(np.abs(f)))
+        if 300.0 < peak < 14000.0:
+            gain = min(4.0, 18000.0 / peak)
+            samples = np.clip(f * gain, -32768.0, 32767.0).astype(np.int16)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)

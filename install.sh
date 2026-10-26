@@ -1,51 +1,120 @@
 #!/usr/bin/env bash
-# Metro kurulum betiği — sudo GEREKTİRMEZ.
+# Metro Assistant — Tek Komutla Otomatik Kurulum Betiği
+# Her yerden çalıştırılabilir:
+#   curl -fsSL https://raw.githubusercontent.com/beratboomindev/MetroAI/main/install.sh | bash
 set -euo pipefail
-cd "$(dirname "$(readlink -f "$0")")"
 
-echo "== Metro kurulumu =="
+REPO_URL="https://github.com/beratboomindev/MetroAI.git"
+INSTALL_DIR="${METRO_DIR:-$HOME/MetroAI}"
 
-if ! command -v python3 >/dev/null; then
-  echo "python3 bulunamadı. Kur: sudo pacman -S python" >&2
-  exit 1
-fi
+echo ""
+echo "╭──────────────────────────────────────────────────────╮"
+echo "│  ◆ Metro Assistant — Otomatik Kurulum Başlatılıyor   │"
+echo "╰──────────────────────────────────────────────────────╯"
+echo ""
 
-if [[ ! -x venv/bin/python ]]; then
-  echo "[1/4] Python sanal ortamı oluşturuluyor..."
-  python3 -m venv venv
-else
-  echo "[1/4] Sanal ortam mevcut."
-fi
-
-echo "[2/4] Python paketleri kuruluyor..."
-venv/bin/python -m pip install --quiet --upgrade pip
-venv/bin/python -m pip install --quiet -r requirements.txt
-
-echo "[3/4] Seslendirme/çalma araçları kontrol ediliyor..."
-for bin in mpv ffmpeg xdg-open notify-send; do
-  if ! command -v "$bin" >/dev/null; then
-    echo "  ! $bin yok — kurmak için: sudo pacman -S $bin"
+# 1) Eksik sistem araçlarını kontrol et ve gerekirse kur
+need_pkgs=()
+for cmd in git curl unzip python3 mpv; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    need_pkgs+=("$cmd")
   fi
 done
 
-echo "[4/4] Türkçe uyandırma modeli..."
-if [[ -d models/vosk-model-small-tr-0.3 ]]; then
-  echo "  model hazır."
+if (( ${#need_pkgs[@]} > 0 )); then
+  echo "[1/6] Eksik sistem paketleri kuruluyor (${need_pkgs[*]})..."
+  if command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --needed --noconfirm git curl unzip python mpv libnotify
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y git curl unzip python3 python3-venv mpv libnotify-bin
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y git curl unzip python3 mpv libnotify
+  fi
 else
+  echo "[1/6] Sistem araçları hazır."
+fi
+
+# 2) Repo dışından (curl | bash ile) çalıştırıldıysa ~/MetroAI içine klonla
+SCRIPT_DIR=""
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+fi
+
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/requirements.txt" && -d "$SCRIPT_DIR/metroai" ]]; then
+  INSTALL_DIR="$SCRIPT_DIR"
+else
+  if [[ -d "$INSTALL_DIR/.git" ]]; then
+    echo "[2/6] Mevcut MetroAI kurulumu güncelleniyor ($INSTALL_DIR)..."
+    git -C "$INSTALL_DIR" pull --ff-only || true
+  else
+    echo "[2/6] MetroAI indiriliyor ($INSTALL_DIR)..."
+    git clone "$REPO_URL" "$INSTALL_DIR"
+  fi
+fi
+
+cd "$INSTALL_DIR"
+
+# 3) Python sanal ortamı ve paketler
+if [[ ! -x venv/bin/python ]]; then
+  echo "[3/6] Python sanal ortamı oluşturuluyor..."
+  python3 -m venv venv
+else
+  echo "[3/6] Python sanal ortamı hazır."
+fi
+
+echo "[4/6] Python paketleri yükleniyor..."
+venv/bin/python -m pip install --quiet --upgrade pip
+venv/bin/python -m pip install --quiet -r requirements.txt
+
+# 4) Türkçe uyandırma modeli
+echo "[5/6] Türkçe ses tanıma modeli hazırlanıyor..."
+if [[ ! -d models/vosk-model-small-tr-0.3 ]]; then
   mkdir -p models
   tmp="models/tr-model.zip"
   curl -L --fail --progress-bar -o "$tmp" \
     https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip
   unzip -q -o "$tmp" -d models/
   rm -f "$tmp"
-  echo "  model indirildi."
 fi
 
+# 5) Varsayılan config.toml, her yerden erişim (PATH) ve Masaüstü Kısayolu
+echo "[6/6] Sistem entegrasyonu ve arka plan servisi kuruluyor..."
 chmod +x metro
-echo
-echo "Kurulum tamam. Şimdi API anahtarlarını gir:"
-echo "  ./metro setup"
-echo "Sonra test et:"
-echo "  ./metro doctor && ./metro check"
-echo "Arka planda başlat:"
-echo "  ./metro service install"
+if [[ ! -f config.toml ]]; then
+  venv/bin/python -c "from metroai import settings; settings.save(settings.load())"
+fi
+
+mkdir -p "$HOME/.local/bin"
+ln -sf "$INSTALL_DIR/metro" "$HOME/.local/bin/metro"
+
+for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  if [[ -f "$rc" ]] && ! grep -q '.local/bin' "$rc"; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$rc"
+  fi
+done
+
+mkdir -p "$HOME/.local/share/applications"
+cat > "$HOME/.local/share/applications/metro-assistant.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Metro Assistant
+Comment=Sesli ve Yazılı Yapay Zeka Asistanı
+Exec=$INSTALL_DIR/metro chat -w
+Icon=audio-input-microphone
+Terminal=false
+Categories=Utility;AudioVideo;
+StartupNotify=false
+EOF
+
+# Arka plan servisini otomatik kur ve başlat
+./metro service install >/dev/null 2>&1 || true
+
+echo ""
+echo "╭──────────────────────────────────────────────────────────────╮"
+echo "│  ✓ Kurulum Tamamlandı! Metro Assistant şu an seni dinliyor.  │"
+echo "╰──────────────────────────────────────────────────────────────╯"
+echo ""
+echo "  • Sesli çağırmak için : Sadece \"Hey Metro\" de!"
+echo "  • Konsolu açmak için  : metro chat"
+echo "  • Sağlayıcı bağlamak  : metro chat içinde /api yaz"
+echo ""

@@ -106,6 +106,12 @@ class Runtime(tools.Ctx):
                 self.wake.reset()
 
             frame = self.mic.read()
+            lvl = audio.rms(frame)
+            if lvl < self.noise_floor:
+                self.noise_floor = max(35.0, 0.92 * self.noise_floor + 0.08 * lvl)
+            elif lvl < self.noise_floor * 1.4:
+                self.noise_floor = min(220.0, 0.995 * self.noise_floor + 0.005 * lvl)
+
             if not self.wake.feed(frame):
                 continue
 
@@ -127,7 +133,7 @@ class Runtime(tools.Ctx):
             except Exception:
                 pass
 
-            # Hey Metro denildiğinde Metro Code terminal penceresini aç (açık değilse)
+            # Hey Metro denildiğinde Metro Assistant terminal penceresini aç (açık değilse)
             tui.emit_event("wake", origin="daemon")
             tui.ensure_terminal_open(self.s)
 
@@ -135,8 +141,8 @@ class Runtime(tools.Ctx):
             if not tui.is_api_onboarded(self.s):
                 tui.emit_event("need_api", origin="daemon")
                 self.say(
-                    "Hiç API çekmemişsin patron. Önce bir provider bağla ki tam güç çalışayım. "
-                    "Açılan Metro Code penceresinden hemen seçebilirsin."
+                    "Henüz hiçbir API çekmemişsin. Önce bir sağlayıcı bağlayalım. "
+                    "Açılan Metro Assistant penceresinden hemen seçebilirsin."
                 )
                 return
 

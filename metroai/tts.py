@@ -37,13 +37,13 @@ class VoicePreset:
 
 
 VOICE_PRESETS: dict[str, VoicePreset] = {
-    "jarvis": VoicePreset(
-        "jarvis",
+    "metro": VoicePreset(
+        "metro",
         "de-DE-FlorianMultilingualNeural",
         "+6%",
         "-4Hz",
         "Erkek",
-        "Tok, karizmatik Jarvis sesi (Multilingual V2 — Önerilen)",
+        "Tok ve doğal asistan sesi (Multilingual V2 — Önerilen)",
     ),
     "florian": VoicePreset(
         "florian",
@@ -75,7 +75,7 @@ VOICE_PRESETS: dict[str, VoicePreset] = {
         "+6%",
         "-3Hz",
         "Erkek",
-        "Klasik Türkçe erkek sesi (sorun olursa Jarvis'e düşer)",
+        "Klasik Türkçe erkek sesi (yedekli)",
     ),
     "seraphina": VoicePreset(
         "seraphina",
@@ -153,7 +153,9 @@ _MD_PATTERNS = [
 
 
 def resolve_voice(spec: str) -> VoicePreset:
-    key = (spec or "jarvis").strip().lower()
+    key = (spec or "metro").strip().lower()
+    if key == "jarvis":
+        key = "metro"
     if key in VOICE_PRESETS:
         return VOICE_PRESETS[key]
     for p in VOICE_PRESETS.values():
@@ -483,7 +485,7 @@ def _candidates_for(preset: VoicePreset) -> list[tuple[str, str, str]]:
     return candidates
 
 
-def synthesize(text: str, voice: str = "jarvis", lang: str = "tr", max_chars: int = 500) -> Path | None:
+def synthesize(text: str, voice: str = "metro", lang: str = "tr", max_chars: int = 500) -> Path | None:
     """Metni sese çevirir ve dosya yolunu döndürür (doctor/test için)."""
     text = _clip(clean(text), max_chars)
     if not text:
@@ -518,7 +520,7 @@ def synthesize(text: str, voice: str = "jarvis", lang: str = "tr", max_chars: in
 
 def speak(
     text: str,
-    voice: str = "jarvis",
+    voice: str = "metro",
     lang: str = "tr",
     max_chars: int = 500,
     on_start: Callable[[], None] | None = None,

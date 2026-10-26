@@ -40,7 +40,7 @@ class Settings:
     name: str = "Metro"
     wake_words: list[str] = field(default_factory=lambda: ["metro"])
     language: str = "tr"
-    voice: str = "jarvis"
+    voice: str = "metro"
     ack_phrase: str = ""
     chime: bool = True
     confirm_dangerous: bool = True
@@ -54,9 +54,9 @@ class Settings:
     vosk_model: str = "models/vosk-model-small-tr-0.3"
     input_device: str | int | None = None
     sample_rate: int = 16000
-    silence_sec: float = 0.9
+    silence_sec: float = 0.85
     max_record_sec: float = 15.0
-    noise_multiplier: float = 2.4
+    noise_multiplier: float = 1.8
     raw: dict[str, Any] = field(default_factory=dict)
 
 

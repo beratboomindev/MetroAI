@@ -1,66 +1,55 @@
-# Metro — CachyOS için her zaman dinleyen ücretsiz sesli asistan
+# Metro Assistant — Her zaman dinleyen ücretsiz sesli ve yazılı yapay zeka asistanı
 
-"Hey Metro" dediğinde uyanan, seninle Türkçe konuşan, bilgisayarında iş yapan bir
-Jarvis. **Tamamen ücretsiz**: yerel model çalıştırmaz, GPU istemez, tek ihtiyacı
-ücretsiz API anahtarıdır.
+"Hey Metro" dediğinde uyanan, seninle Türkçe konuşan, bilgisayarında iş yapan
+akıllı sistem asistanı. **Tamamen ücretsiz**: yerel model çalıştırmaz, GPU istemez.
+
+## Tek Komutla Kurulum (Her Yerden)
+
+Terminali aç ve sadece şunu yapıştır — gerisini (paketler, Türkçe ses modeli, masaüstü kısayolu ve arka plan servisi) kendi halleder:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beratboomindev/MetroAI/main/install.sh | bash
+```
+
+*(Repo zaten indirilmişse sadece `./install.sh` veya doğrudan `./metro` yazman yeterli!)*
 
 ## Nasıl çalışır?
 
 ```
-mikrofon ──► Vosk (yerel, %1 CPU) ──► "metro" duyuldu mu?
-                                          │ evet
-                                          ▼
-                              kayıt + sessizlik algılama (VAD)
-                                          ▼
-                    Groq Whisper ──► Gemini ──► Vosk  (ses → yazı)
-                                          ▼
-              Ajan: hızlı yerel komutlar veya ücretsiz LLM zinciri
-                                          ▼
-                     edge-tts (Emel/Ahmet) ──► hoparlör
+mikrofon ──► Vosk (AGC + Gramer + Fonetik) ──► "metro" duyuldu mu?
+                                                      │ evet
+                                                      ▼
+                                          kayıt + sessizlik algılama (VAD)
+                                                      ▼
+                                Groq Whisper ──► Gemini ──► Vosk  (ses → yazı)
+                                                      ▼
+                          Ajan: hızlı yerel komutlar veya ücretsiz LLM zinciri
+                                                      ▼
+                     Ön-ısıtmalı Multilingual Neural TTS ──► hoparlör + Metro Assistant
 ```
 
-- **Uyandırma & Metro Code Konsolu**: Vosk Türkçe modeli, çevrimdışı, hafif. "metro", "hey metro",
-  "metre" gibi yakın telaffuzları da yakalar. Uyandığında Claude Code / J.A.R.V.I.S. tarzı etkileşimli
-  **Metro Code** terminal penceresi otomatik açılır; hem sesli hem yazılı aynı oturumda sohbet edebilirsin.
+- **Çoklu-Konuşmacı Uyandırma & Metro Assistant Konsolu**: Otomatik ses seviyesi dengeleme (AGC), gramer tabanlı algılama ve fonetik eşleştirme sayesinde farklı ses tonlarını ve uzaktaki konuşmacıları da rahatlıkla algılar. Uyandığında **Metro Assistant** penceresi otomatik açılır; hem sesli hem yazılı aynı oturumda sohbet edebilirsin.
 - **Model zinciri**: OpenCode (:free) → Groq → Gemini → OpenRouter (:free) → Cerebras → Mistral → Pollinations.
   Bir model kota/429/401 hatası verirse **o model dinlenmeye alınır**, sıradaki
   otomatik devreye girer. Bekleme süreleri `state/cooldowns.json` dosyasında
   kalıcıdır, servis yeniden başlasa da hatırlanır.
-- **Sıfır gecikmeli Jarvis Sesi**: Ön-ısıtmalı (pre-warmed) WebSocket ve canlı `mpv` akışı sayesinde
+- **Sıfır gecikmeli Doğal Ses**: Ön-ısıtmalı (pre-warmed) WebSocket ve canlı `mpv` akışı sayesinde
   yazılı yanıt ile sesli konuşma aynı anda (0 ms farkla) başlar.
 - **Model listeleri otomatik tazelenir**: sağlayıcıların `/models` uç noktası
   okunur, ölmüş modeller zincirden düşer, OpenCode ve OpenRouter'da yeni `:free` modeller
   kendiliğinden eklenir.
 
-## Kurulum
-
-```bash
-cd ~/MetroAI
-./install.sh          # venv + paketler + Türkçe uyandırma modeli
-./metro setup         # ücretsiz API anahtarları + ses seçimi
-./metro doctor        # her şey yerinde mi?
-```
-
-`./metro setup` sırasında şu ücretsiz anahtarlardan **en az birini** girmen yeterli:
-
-| Sağlayıcı  | Anahtar sayfası                        | Not |
-|------------|----------------------------------------|-----|
-| Groq       | https://console.groq.com/keys          | En hızlı; Whisper STT de buradan |
-| Gemini     | https://aistudio.google.com/apikey     | Geniş ücretsiz kota |
-| OpenRouter | https://openrouter.ai/keys             | Onlarca `:free` model |
-| Cerebras   | https://cloud.cerebras.ai              | Ücretsiz katman |
-| Mistral    | https://console.mistral.ai/api-keys    | Ücretsiz katman |
-
 ## Kullanım
 
+Kurulumdan sonra herhangi bir klasörden doğrudan `metro` komutunu kullanabilirsin:
+
 ```bash
-./metro                      # ön planda çalıştır (test için)
-./metro chat                 # Claude Code / Jarvis tarzı etkileşimli sohbet konsolu
-./metro chat -w              # ayrı bir terminal penceresinde Metro Code aç
-./metro voices --set jarvis  # Jarvis ses profilini seç ve test et
-./metro service install      # arka planda + oturum açılışında otomatik
-./metro status               # durum + model zinciri
-./metro service logs -f      # canlı log
+metro                        # ön planda çalıştır
+metro chat                   # Metro Assistant etkileşimli sohbet konsolu
+metro chat -w                # ayrı bir pencerede Metro Assistant aç
+metro voices --set metro     # varsayılan ses profilini seç ve test et
+metro status                 # durum + model zinciri
+metro service logs -f        # canlı servis logları
 ```
 
 ### Sesli komut örnekleri
