@@ -1,0 +1,15 @@
+[Unit]
+Description=Metro sesli asistan
+After=pipewire.service pipewire-pulse.service graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/MetroAI
+ExecStart=%h/MetroAI/venv/bin/python -m metroai run
+Restart=always
+RestartSec=4
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

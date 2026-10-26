@@ -1,0 +1,113 @@
+# Metro örnek yapılandırması.
+# Bunu elle kopyalamak yerine `./metro setup` çalıştır — anahtarları sorar ve yazar.
+
+[assistant]
+name = "Metro"
+# "hey metro" / "metro" / "hey metre" hepsi yakalanır (bulanık eşleşme).
+wake_words = ["metro"]
+language = "tr"
+# Ses profilleri: jarvis (tok erkek, önerilen) | brian | remy | seraphina | emma | emel (`./metro voices`)
+voice = "jarvis"
+# Uyandıktan sonra söylenecek kısa cümle; boş bırakırsan sadece çan sesi çalar.
+ack_phrase = ""
+chime = true
+# Tehlikeli işlemlerde (shell, kapatma) sesli onay ister.
+confirm_dangerous = true
+# "Hey Metro" denildiğinde Claude Code / Jarvis tarzı etkileşimli terminal penceresini otomatik açar.
+auto_open_terminal = true
+terminal = "auto"
+max_reply_chars = 500
+history_turns = 6
+
+[stt]
+# Sırayla denenir. vosk = tamamen çevrimdışı yedek.
+provider_order = ["groq", "gemini", "vosk"]
+model = "whisper-large-v3"
+vosk_model = "models/vosk-model-small-tr-0.3"
+
+[audio]
+# ./metro devices ile numarayı öğren; isim parçası da yazabilirsin ("Mic1").
+input_device = "default"
+sample_rate = 16000
+silence_sec = 0.9
+max_record_sec = 15.0
+# Gürültü eşiği çarpanı: düşük = daha hassas, yüksek = daha az yanlış tetikleme.
+noise_multiplier = 2.4
+
+# --- Sağlayıcılar: sırayla denenir, kota dolan model dinlenmeye alınır ---
+# En az birine anahtar gir. Boş anahtarlı sağlayıcılar atlanır.
+
+[[providers]]
+# En yüksek öncelik: OpenCode ücretsiz modelleri (anahtarsız / opencode CLI veya OPENCODE_API_KEY)
+id = "opencode"
+base_url = "https://opencode.ai/zen/v1"
+api_key = ""
+api_key_env = "OPENCODE_API_KEY"
+models = ["opencode/deepseek-v4.1-flash-free", "opencode/glm-5.3-flash-free", "opencode/mimo-v2.6-flash-free", "opencode/nemotron-3.5-lightning-free", "opencode/beam-free", "opencode/flint-40b-free", "opencode/big-pickle"]
+free_only = true
+dynamic = true
+enabled = true
+keyless = true
+
+[[providers]]
+id = "groq"
+base_url = "https://api.groq.com/openai/v1"
+api_key = ""                     # https://console.groq.com/keys
+api_key_env = "GROQ_API_KEY"     # istersen ortam değişkeni de kullanabilirsin
+models = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+free_only = false
+dynamic = true                   # model listesi otomatik güncellenir
+enabled = true
+
+[[providers]]
+id = "gemini"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+api_key = ""                     # https://aistudio.google.com/apikey
+api_key_env = "GEMINI_API_KEY"
+models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+free_only = false
+dynamic = true
+enabled = true
+
+[[providers]]
+id = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+api_key = ""                     # https://openrouter.ai/keys
+api_key_env = "OPENROUTER_API_KEY"
+models = []                      # boş = :free modeller otomatik seçilir
+free_only = true
+dynamic = true
+enabled = true
+
+[[providers]]
+id = "cerebras"
+base_url = "https://api.cerebras.ai/v1"
+api_key = ""
+api_key_env = "CEREBRAS_API_KEY"
+models = ["llama-3.3-70b", "llama-3.1-8b"]
+free_only = false
+dynamic = true
+enabled = true
+
+[[providers]]
+id = "mistral"
+base_url = "https://api.mistral.ai/v1"
+api_key = ""
+api_key_env = "MISTRAL_API_KEY"
+models = ["mistral-small-latest", "open-mistral-nemo"]
+free_only = false
+dynamic = true
+enabled = true
+
+[[providers]]
+# Anahtarsız, tamamen ücretsiz yedek model. Hiçbir anahtar girmezsen Metro
+# yine de çalışır (yalnızca bu model + yerel Vosk ile).
+id = "pollinations"
+base_url = "https://text.pollinations.ai/openai"
+api_key = ""
+api_key_env = ""
+models = ["openai-fast"]
+free_only = false
+dynamic = true
+enabled = true
+keyless = true
