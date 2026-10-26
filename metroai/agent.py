@@ -123,6 +123,8 @@ class Agent:
             return tools.time_now({}, self.ctx)
         if has("pil durumu", "batarya", "sarj ne kadar"):
             return tools.system_info({"what": "battery"}, self.ctx)
+        if has("api bagla", "provider bagla", "api cek", "saglayici bagla", "modelleri cek"):
+            return "Provider ve API bağlama menüsünü açıyorum. Metro Code penceresinden seçebilir veya /api yazabilirsin."
         if re.fullmatch(r"(uyu|dinlen|kapan|gizlen|metro kapan)[\s!.,]*", t):
             self.ctx.sleep_minutes(15)
             return "Tamam, on beş dakika dinleniyorum. Beni tekrar çağırırsan buradayım."

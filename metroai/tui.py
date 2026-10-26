@@ -23,6 +23,32 @@ EVENTS_FILE = STATE_DIR / "events.jsonl"
 TUI_PID_FILE = STATE_DIR / "tui.pid"
 STATUS_FILE = STATE_DIR / "status"
 HISTORY_FILE = STATE_DIR / "chat_history"
+ONBOARDED_FILE = STATE_DIR / "api_onboarded"
+
+PROVIDER_META: dict[str, tuple[str, str]] = {
+    "opencode": ("OpenCode Ücretsiz Modeller (Zen / CLI)", "https://opencode.ai/zen"),
+    "groq": ("Groq (En hızlı LLM + Whisper STT)", "https://console.groq.com/keys"),
+    "gemini": ("Google Gemini 2.5 (Geniş ücretsiz kota + ses)", "https://aistudio.google.com/apikey"),
+    "openrouter": ("OpenRouter (Onlarca :free model)", "https://openrouter.ai/keys"),
+    "cerebras": ("Cerebras (Ultra hızlı Llama)", "https://cloud.cerebras.ai"),
+    "mistral": ("Mistral AI (Ücretsiz katman)", "https://console.mistral.ai/api-keys"),
+}
+
+
+def is_api_onboarded(s: Settings | None = None) -> bool:
+    """Kullanıcı en az bir kez API/provider seçimi yaptı mı veya anahtar girdi mi?"""
+    if ONBOARDED_FILE.exists():
+        return True
+    s = s or load()
+    return any(bool(p.key()) for p in s.providers if not p.keyless)
+
+
+def mark_api_onboarded() -> None:
+    ensure_dirs()
+    try:
+        ONBOARDED_FILE.write_text(datetime.now().isoformat(), encoding="utf-8")
+    except Exception:
+        pass
 
 # ANSI renk kodları (Claude Code & Jarvis paleti)
 RESET = "\033[0m"
@@ -296,6 +322,10 @@ class MetroCodeTUI:
         etype = ev.get("type")
         if etype == "wake":
             self.print_system("Hey Metro algılandı — seni dinliyorum...")
+        elif etype == "need_api":
+            self.print_system(
+                "Hiç API çekmemişsin! Aşağıya /api yazarak hemen provider bağlayabilir ve modelleri çekebilirsin."
+            )
         elif etype == "user_voice":
             text = ev.get("text", "")
             src = ev.get("source", "mikrofon")
@@ -310,6 +340,132 @@ class MetroCodeTUI:
                 self.agent.history.append((u, text))
             self.print_assistant(text, model)
 
+    # ---------- Provider / API Bağlama ve Model Çekme Sihirbazı ----------
+    def _pull_provider_models(self, pid: str | None = None) -> None:
+        self.s = load()
+        self.chain = LLMChain(self.s)
+        targets = [p for p in self.s.providers if (pid is None or p.id == pid) and p.usable()]
+        if not targets:
+            print(f"\n  {YELLOW}Aktif sağlayıcı bulunamadı. Önce /api ile bir sağlayıcı bağla.{RESET}\n")
+            return
+        print(f"\n  {CYAN}🔄 Sağlayıcılardan güncel API modelleri çekiliyor...{RESET}")
+        for p in targets:
+            models = self.chain._discover(p, force=True)
+            if models:
+                p.models = models[:8] if not p.models else p.models
+                preview = ", ".join(models[:4])
+                more = f" (+{len(models) - 4} diğer)" if len(models) > 4 else ""
+                print(f"  {GREEN}✓{RESET} {BOLD}{p.id:<12}{RESET} → {len(models)} model çekildi: {WHITE}{preview}{RESET}{GRAY}{more}{RESET}")
+            else:
+                print(f"  {YELLOW}•{RESET} {BOLD}{p.id:<12}{RESET} → model listesi alınamadı (varsayılanlar korunuyor)")
+        save(self.s)
+        mark_api_onboarded()
+        print()
+
+    def run_api_wizard(self, first_time: bool = False) -> None:
+        self.s = load()
+        self.chain = LLMChain(self.s)
+        providers = [p for p in self.s.providers if p.id in PROVIDER_META]
+
+        if first_time:
+            print(f"  {YELLOW}{BOLD}⚡ Hiç API çekmemişsin! Önce bir provider bağlayıp modelleri çekelim.{RESET}")
+            print(f"  {GRAY}(OpenCode ücretsiz modellerini tek tuşla çekebilir veya Groq/Gemini/OpenRouter anahtarı girebilirsin){RESET}\n")
+
+        while True:
+            print(f"  {BOLD}🔌 Sağlayıcı (Provider) & API Bağlama Merkezi:{RESET}")
+            for idx, p in enumerate(providers, 1):
+                title, _ = PROVIDER_META.get(p.id, (p.id, ""))
+                if p.key():
+                    status = f"{GREEN}● Anahtar Bağlı ({len(p.models)} model){RESET}"
+                elif p.keyless and p.id == "opencode":
+                    status = f"{CYAN}● CLI Hazır ({len(p.models)} ücretsiz model){RESET}"
+                else:
+                    status = f"{GRAY}○ Bağlı Değil{RESET}"
+                print(f"    {CYAN}{idx}){RESET} {BOLD}{p.id:<12}{RESET} {status:<42} {GRAY}{title}{RESET}")
+
+            print(f"    {CYAN}p){RESET} {WHITE}Tüm bağlı sağlayıcılardan güncel modelleri API'den çek (Pull){RESET}")
+            print(f"    {CYAN}0){RESET} {GRAY}Tamamla ve sohbete başla{RESET}\n")
+
+            try:
+                choice = input(f"  {ORANGE}{BOLD}Seçimin (1-{len(providers)} / p / 0) [1]:{RESET} ").strip().lower() or "1"
+            except (EOFError, KeyboardInterrupt):
+                print()
+                mark_api_onboarded()
+                break
+
+            if choice in ("0", "q", "exit", "gec", "tamam"):
+                mark_api_onboarded()
+                print(f"\n  {GREEN}✓{RESET} Hazır! Artık 'Hey Metro' diyerek veya aşağıdan yazarak konuşabilirsin.\n")
+                break
+
+            if choice == "p":
+                self._pull_provider_models()
+                break
+
+            if not choice.isdigit() or not (1 <= int(choice) <= len(providers)):
+                print(f"  {YELLOW}Lütfen listeden geçerli bir numara seç.{RESET}\n")
+                continue
+
+            p = providers[int(choice) - 1]
+            title, url = PROVIDER_META.get(p.id, (p.id, ""))
+            print(f"\n  {BOLD}→ {title}{RESET} ({CYAN}{url}{RESET})")
+
+            if p.id == "opencode":
+                print(f"    {CYAN}1){RESET} Ücretsiz OpenCode modellerini API'den şimdi çek ve aktif et {GREEN}(Önerilen){RESET}")
+                print(f"    {CYAN}2){RESET} `opencode auth login` çalıştır (Google / Nvidia / vb. hesap bağla)")
+                print(f"    {CYAN}3){RESET} OpenCode Zen API anahtarı gir")
+                sub = input(f"  {ORANGE}Seçim [1]: {RESET}").strip() or "1"
+                if sub == "2":
+                    subprocess.run(["opencode", "auth", "login"])
+                elif sub == "3":
+                    key = input(f"  {CYAN}OpenCode API Anahtarı:{RESET} ").strip()
+                    if key:
+                        p.api_key = key
+                print(f"  {CYAN}🔄 OpenCode ücretsiz modelleri çekiliyor...{RESET}")
+                models = self.chain._discover(p, force=True)
+                if models:
+                    p.models = models
+                    print(f"  {GREEN}✓ {len(models)} ücretsiz model çekildi:{RESET}")
+                    for m in models:
+                        print(f"    • {WHITE}{m}{RESET}")
+                save(self.s)
+                mark_api_onboarded()
+                print(f"\n  {GREEN}✓ OpenCode modelleri bağlandı ve birinci önceliğe alındı!{RESET}\n")
+                break
+
+            # Diğer sağlayıcılar (Groq, Gemini, OpenRouter, Cerebras, Mistral)
+            open_br = input(f"  {GRAY}Anahtar sayfasını tarayıcıda açayım mı? (e/H):{RESET} ").strip().lower()
+            if open_br.startswith(("e", "y")):
+                tools._spawn(["xdg-open", url])
+
+            key = input(f"  {CYAN}{p.id} API Anahtarı (boş = iptal):{RESET} ").strip()
+            if not key:
+                print(f"  {GRAY}İptal edildi.{RESET}\n")
+                continue
+
+            p.api_key = key
+            p.enabled = True
+            save(self.s)
+
+            print(f"  {CYAN}🔄 {p.id} sunucusundan modeller çekiliyor...{RESET}")
+            models = self.chain._discover(p, force=True)
+            if models:
+                if not p.models:
+                    p.models = models[:6]
+                print(f"  {GREEN}✓ {len(models)} model API'den çekildi!{RESET} İlk modeller: {', '.join(models[:5])}")
+
+            test_model = (p.models or models or ["?"])[0]
+            print(f"  {CYAN}⚡ {p.id}/{test_model} canlı test ediliyor...{RESET}")
+            try:
+                reply = self.chain._call(p, test_model, [{"role": "user", "content": "Sadece OK yaz."}], 15, 0.0)
+                print(f"  {GREEN}✓ Bağlantı başarılı! Yanıt: {reply[:40]!r}{RESET}\n")
+                mark_api_onboarded()
+                self.agent = Agent(self.s, self.chain, self.ctx)
+                break
+            except Exception as e:
+                reason = getattr(e, "reason", str(e))
+                print(f"  {RED}✗ Test başarısız ({reason}). Anahtarı kontrol edip tekrar deneyebilirsin.{RESET}\n")
+
     # ---------- Slash Komutları ----------
     def _handle_slash(self, raw: str) -> bool:
         parts = raw.strip().split(maxsplit=1)
@@ -322,6 +478,8 @@ class MetroCodeTUI:
 
         if cmd == "/help":
             print(f"\n  {BOLD}Metro Code Komutları:{RESET}")
+            print(f"  {CYAN}/api{RESET}                Sağlayıcı (Provider) bağla ve API modellerini çek")
+            print(f"  {CYAN}/pull{RESET}               Bağlı sağlayıcılardan güncel model listesini çek")
             print(f"  {CYAN}/voice{RESET}              Mevcut ses profillerini listele")
             print(f"  {CYAN}/voice <ad>{RESET}         Sesi değiştir ve test et (örn. {WHITE}/voice jarvis{RESET}, {WHITE}/voice brian{RESET})")
             print(f"  {CYAN}/speak{RESET}              Yazılı sohbette sesli okumayı aç/kapat")
@@ -330,6 +488,14 @@ class MetroCodeTUI:
             print(f"  {CYAN}/sh <komut>{RESET}         Terminal komutu çalıştır")
             print(f"  {CYAN}/clear{RESET}              Ekranı ve sohbet geçmişini temizle")
             print(f"  {CYAN}/exit{RESET}               Metro Code penceresini kapat\n")
+            return True
+
+        if cmd in ("/api", "/provider", "/providers", "/connect", "/setup"):
+            self.run_api_wizard(first_time=False)
+            return True
+
+        if cmd == "/pull":
+            self._pull_provider_models(arg or None)
             return True
 
         if cmd == "/clear":
@@ -444,6 +610,10 @@ class MetroCodeTUI:
         os.system("clear")
         self.render_header()
 
+        # İlk açılışta henüz hiçbir API çekilmediyse / provider bağlanmadıysa otomatik sor
+        if not is_api_onboarded(self.s):
+            self.run_api_wizard(first_time=True)
+
         watcher = threading.Thread(target=self._watch_events, daemon=True)
         watcher.start()
 
@@ -466,6 +636,19 @@ class MetroCodeTUI:
 
                 if user_in.startswith("/"):
                     self._handle_slash(user_in)
+                    continue
+
+                if user_in.lower() in (
+                    "api bağla",
+                    "api bagla",
+                    "provider bağla",
+                    "provider bagla",
+                    "api çek",
+                    "api cek",
+                    "model çek",
+                    "model cek",
+                ):
+                    self.run_api_wizard(first_time=False)
                     continue
 
                 # LLM / Ajan çağrısı

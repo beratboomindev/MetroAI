@@ -131,6 +131,15 @@ class Runtime(tools.Ctx):
             tui.emit_event("wake", origin="daemon")
             tui.ensure_terminal_open(self.s)
 
+            # İlk kez "Hey Metro" denildiğinde henüz API çekilmediyse/provider bağlanmadıysa uyar
+            if not tui.is_api_onboarded(self.s):
+                tui.emit_event("need_api", origin="daemon")
+                self.say(
+                    "Hiç API çekmemişsin patron. Önce bir provider bağla ki tam güç çalışayım. "
+                    "Açılan Metro Code penceresinden hemen seçebilirsin."
+                )
+                return
+
             if self.s.chime:
                 audio.chime(self.s.sample_rate)
             else:
