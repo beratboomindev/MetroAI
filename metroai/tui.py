@@ -84,6 +84,8 @@ def is_api_onboarded(s: Settings | None = None) -> bool:
     if ONBOARDED_FILE.exists():
         return True
     s = s or load()
+    if s.active_model:
+        return True
     return any(bool(p.key()) for p in s.providers if not p.keyless)
 
 
@@ -1337,7 +1339,11 @@ class MetroAssistantTUI:
                     continue
 
                 if user_in.startswith("/"):
-                    self._handle_slash(user_in)
+                    try:
+                        self._handle_slash(user_in)
+                    except Exception as e:
+                        log_.exception("slash komutu hatası")
+                        print(f"\n  {RED}Komut hatası: {e}{RESET}\n")
                     continue
 
                 low_in = user_in.lower()

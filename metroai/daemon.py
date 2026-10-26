@@ -96,8 +96,14 @@ class Runtime(tools.Ctx):
         self._notify("Metro hazır. 'Hey Metro' diyerek çağırabilirsin.")
 
         while not self.stop:
+            if self.keys.consume_wake():
+                self.paused_until = 0.0
+                log_.info("uyandırma tetiklendi (kısayol tuşu: %s)", self.keys.hotkey)
+                self._on_wake()
+                continue
+
             if time.time() < self.paused_until:
-                time.sleep(0.25)
+                time.sleep(0.20)
                 self._was_paused = True
                 continue
             if self._was_paused:
@@ -128,11 +134,9 @@ class Runtime(tools.Ctx):
             # Sesi veya ayarları terminalden değiştirilmiş olabilir, güncel tut
             try:
                 latest = load()
-                self.s.voice = latest.voice
-                self.s.auto_open_terminal = latest.auto_open_terminal
-                self.s.always_on_top = latest.always_on_top
-                self.s.terminal = latest.terminal
-                self.s.hotkey = latest.hotkey
+                self.s = latest
+                self.chain.s = latest
+                self.agent.s = latest
                 self.keys.set_hotkey(latest.hotkey)
             except Exception:
                 pass
