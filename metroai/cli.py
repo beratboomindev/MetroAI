@@ -177,13 +177,18 @@ def cmd_setup(args) -> int:
     print(f"\n  {BOLD}[4/5] ⌨️ Konuşma Anahtar Tuşu (İsteğe Bağlı){RESET}")
     tui.prompt_hotkey_setup(s)
 
-    # --- 5) Pencere Görünümü (Her Zaman Üstte) ---
-    print(f"  {BOLD}[5/5] 📌 Pencere Görünümü{RESET}")
+    # --- 5) Pencere Görünümü & Sohbet Geçmişi ---
+    print(f"  {BOLD}[5/5] 📌 Pencere Görünümü & Sohbet Geçmişi{RESET}")
     top_default = "E" if s.always_on_top else "h"
     top_ans = _ask(f"  {ORANGE}Metro Assistant kutusu ekranda her zaman üstte dursun mu? (E/h){RESET}", top_default)
     s.always_on_top = not top_ans.lower().startswith(("h", "n"))
     tui.ensure_always_on_top_rule(s.always_on_top)
     _ok(f"Her zaman üstte modu: {'Açık' if s.always_on_top else 'Kapalı'}")
+
+    hist_default = "E" if s.save_history else "h"
+    hist_ans = _ask(f"  {ORANGE}İsteğe bağlı sohbet geçmişi kaydedilsin mi? (/gecmis ile görüntülenir) (E/h){RESET}", hist_default)
+    s.save_history = not hist_ans.lower().startswith(("h", "n"))
+    _ok(f"Sohbet geçmişi kaydı: {'Açık' if s.save_history else 'Kapalı'}")
 
     if not vosk_path(s).exists():
         print("\n  Türkçe ses tanıma modeli indiriliyor (~50 MB)...")

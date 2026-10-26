@@ -50,6 +50,7 @@ class Settings:
     hotkey: str = ""
     active_model: str = ""
     custom_prompt: str = ""
+    save_history: bool = True
     aliases: dict[str, str] = field(default_factory=dict)
     max_reply_chars: int = 500
     history_turns: int = 6
@@ -147,6 +148,7 @@ def load() -> Settings:
     s.hotkey = str(a.get("hotkey", s.hotkey)).strip()
     s.active_model = str(a.get("active_model", s.active_model)).strip()
     s.custom_prompt = str(a.get("custom_prompt", s.custom_prompt)).strip()
+    s.save_history = bool(a.get("save_history", s.save_history))
     s.max_reply_chars = int(a.get("max_reply_chars", s.max_reply_chars))
     s.history_turns = int(a.get("history_turns", s.history_turns))
 
@@ -222,6 +224,7 @@ def render_config(s: Settings) -> str:
     lines.append(f"hotkey = {_toml_str(s.hotkey)}")
     lines.append(f"active_model = {_toml_str(s.active_model)}")
     lines.append(f"custom_prompt = {_toml_str(s.custom_prompt)}")
+    lines.append(f"save_history = {'true' if s.save_history else 'false'}")
     lines.append(f"max_reply_chars = {s.max_reply_chars}")
     lines.append(f"history_turns = {s.history_turns}\n")
 

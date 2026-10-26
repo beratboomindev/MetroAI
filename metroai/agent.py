@@ -61,6 +61,13 @@ class Agent:
         if fast is not None:
             return fast
 
+        # Bağlam (context) çok şiştiyse eski mesajları buda (son 2 konuşma çiftini koru)
+        total_hist_chars = sum(len(u) + len(a) for u, a in self.history)
+        if len(self.history) > max(4, self.s.history_turns) or total_hist_chars > 3200:
+            recent = list(self.history)[-2:]
+            self.history.clear()
+            self.history.extend(recent)
+
         messages = [{"role": "system", "content": self._system(query=text)}]
         for u, a in self.history:
             messages.append({"role": "user", "content": u})

@@ -17,7 +17,10 @@ from .settings import CACHE_DIR, STATE_DIR, Provider, Settings
 log_ = log.get()
 
 COOLDOWN_FILE = STATE_DIR / "cooldowns.json"
+OPENCODE_SESSION_FILE = STATE_DIR / "opencode_session.json"
 DISCOVERY_TTL = 6 * 3600
+MAX_OPENCODE_TURNS = 15
+MAX_OPENCODE_CHARS = 9500
 
 
 @dataclass
@@ -197,6 +200,26 @@ class LLMChain:
         self.cooldowns.clear()
         _save_json(COOLDOWN_FILE, self.cooldowns)
 
+    def reset_session(self) -> None:
+        """Aktif OpenCode oturumunu temizler ve bir sonraki mesajda taze oturum başlatır."""
+        sess = _load_json(OPENCODE_SESSION_FILE, {})
+        old_sid = sess.get("session_id", "")
+        if old_sid:
+            oc = _opencode_bin()
+            if oc:
+                try:
+                    subprocess.Popen(
+                        [oc, "session", "delete", old_sid],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except Exception:
+                    pass
+        try:
+            OPENCODE_SESSION_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     # ---------- bekleme süreleri ----------
     @staticmethod
     def _ck(p: str, m: str) -> str:
@@ -250,32 +273,77 @@ class LLMChain:
             except _ModelError:
                 pass
 
-        # 2) Resmi opencode CLI üzerinden ücretsiz modelleri çağır
+        # 2) Resmi opencode CLI üzerinden ücretsiz modelleri çağır (Tek Oturum + Şişince Otomatik Yenileme)
         oc = _opencode_bin()
         if not oc:
             raise _ModelError("opencode CLI bulunamadı", 3600)
 
         full_model = model if "/" in model else f"opencode/{model}"
-        parts: list[str] = []
+
+        sess = _load_json(OPENCODE_SESSION_FILE, {})
+        sid = str(sess.get("session_id") or "").strip()
+        turns = int(sess.get("turns") or 0)
+        total_chars = int(sess.get("chars") or 0)
+
+        # Bağlam (context) çok şiştiyse eski oturumu arka planda sil ve taze oturuma geç
+        if sid and (turns >= MAX_OPENCODE_TURNS or total_chars >= MAX_OPENCODE_CHARS):
+            log_.info("OpenCode bağlamı doldu (%d tur, %d krk) -> taze oturum açılıyor", turns, total_chars)
+            try:
+                subprocess.Popen(
+                    [oc, "session", "delete", sid],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+            sid = ""
+            turns = 0
+            total_chars = 0
+
+        user_msg = ""
+        sys_msg = ""
         for m in messages:
-            role = m.get("role", "user")
+            role = m.get("role", "")
             content = (m.get("content") or "").strip()
-            if not content:
-                continue
             if role == "system":
-                parts.append(content)
+                sys_msg = content
             elif role == "user":
-                parts.append(f"Kullanıcı: {content}")
-            elif role == "assistant":
-                parts.append(f"Asistan: {content}")
-        parts.append(
-            "Not: Kendi dosya/bash araçlarını ÇALIŞTIRMA. Yalnızca yukarıdaki kurallara göre düz metin veya JSON yanıt döndür."
-        )
-        prompt = "\n\n".join(parts)
+                user_msg = content
+
+        if not sid:
+            # İlk mesajda (veya bağlam yenilendiğinde) sistem kurallarını + son bağlamı bir kez tanıt
+            parts: list[str] = []
+            if sys_msg:
+                parts.append(sys_msg)
+            # Yenilenen oturumda son 2 konuşma çiftini özet bağlam olarak aktar
+            non_sys = [m for m in messages if m.get("role") != "system"]
+            for m in non_sys[-5:]:
+                r_label = "Kullanıcı" if m.get("role") == "user" else "Asistan"
+                c_text = (m.get("content") or "").strip()
+                if c_text:
+                    parts.append(f"{r_label}: {c_text}")
+            parts.append(
+                "Not: Kendi dosya/bash araçlarını ÇALIŞTIRMA. Yalnızca yukarıdaki kurallara göre kısa düz metin veya araç JSON'u döndür."
+            )
+            prompt = "\n\n".join(parts)
+            cmd = [oc, "run", "--format", "json", "--title", "Metro Assistant", "-m", full_model, prompt]
+        else:
+            # Mevcut oturuma devam et: kendini tekrar tanıtma, sadece yeni mesajı gönder (minimum token!)
+            mem_line = ""
+            if "KULLANICI HAFIZASI:" in sys_msg:
+                for line in sys_msg.splitlines():
+                    if line.startswith("KULLANICI HAFIZASI:"):
+                        mem_line = f"[{line}]\n"
+                        break
+            prompt = (
+                f"{mem_line}{user_msg}\n"
+                "(Kendi bash/dosya aracını çalıştırma; sadece Türkçe düz metin veya {\"tool\":...} JSON döndür.)"
+            )
+            cmd = [oc, "run", "--format", "json", "-s", sid, "-m", full_model, prompt]
 
         try:
             r = subprocess.run(
-                [oc, "run", "--format", "json", "-m", full_model, prompt],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=45,
@@ -287,6 +355,7 @@ class LLMChain:
 
         texts: list[str] = []
         err_msg = ""
+        new_sid = sid
         for line in (r.stdout or "").splitlines():
             line = line.strip()
             if not line.startswith("{"):
@@ -295,6 +364,8 @@ class LLMChain:
                 ev = json.loads(line)
             except Exception:
                 continue
+            if not new_sid and ev.get("sessionID"):
+                new_sid = str(ev["sessionID"])
             etype = ev.get("type")
             if etype == "text":
                 t = (ev.get("part") or {}).get("text") or ""
@@ -305,7 +376,23 @@ class LLMChain:
 
         out = "".join(texts).strip()
         if out:
+            if new_sid:
+                _save_json(
+                    OPENCODE_SESSION_FILE,
+                    {
+                        "session_id": new_sid,
+                        "turns": turns + 1,
+                        "chars": total_chars + len(prompt) + len(out),
+                        "updated_at": time.time(),
+                    },
+                )
             return out
+        # Eğer eski session silindiyse ve hata verdiyse oturumu sıfırla
+        if sid:
+            try:
+                OPENCODE_SESSION_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
         if err_msg or r.returncode != 0:
             detail = (err_msg or r.stderr or r.stdout or f"kod {r.returncode}").strip()[:180]
             raise _ModelError(f"opencode ({detail})", 180)

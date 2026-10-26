@@ -24,6 +24,7 @@ EVENTS_FILE = STATE_DIR / "events.jsonl"
 TUI_PID_FILE = STATE_DIR / "tui.pid"
 STATUS_FILE = STATE_DIR / "status"
 HISTORY_FILE = STATE_DIR / "chat_history"
+SESSIONS_FILE = STATE_DIR / "chat_sessions.json"
 ONBOARDED_FILE = STATE_DIR / "api_onboarded"
 CONFIRM_FILE = STATE_DIR / "confirm_reply"
 
@@ -175,7 +176,72 @@ def prompt_hotkey_setup(s: Settings) -> str:
     return s.hotkey
 
 
-# ---------- Olay (Event) veri yolu ----------
+# ---------- Olay (Event) veri yolu ve İsteğe Bağlı Sohbet Geçmişi ----------
+def _load_sessions() -> list[dict]:
+    if not SESSIONS_FILE.exists():
+        return []
+    try:
+        data = json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_sessions(sessions: list[dict]) -> None:
+    ensure_dirs()
+    tmp = SESSIONS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(sessions[-25:], ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(SESSIONS_FILE)
+
+
+def start_new_chat_session() -> None:
+    """Yeni bir sohbet oturumu başlatır (sonraki mesaj yeni başlık altında kaydedilir)."""
+    sessions = _load_sessions()
+    if sessions and not sessions[-1].get("closed"):
+        sessions[-1]["closed"] = True
+        _save_sessions(sessions)
+
+
+def _record_session_turn(user_text: str, assistant_text: str, model: str | None = None) -> None:
+    s = load()
+    if not s.save_history:
+        return
+    u = (user_text or "").strip()
+    a = (assistant_text or "").strip()
+    if not u or not a:
+        return
+
+    now = time.time()
+    sessions = _load_sessions()
+    # Son oturum açıksa ve üzerinden 2 saatten az geçtiyse ve 16 turu aşmadıysa aynı oturuma ekle
+    if (
+        sessions
+        and not sessions[-1].get("closed")
+        and now - float(sessions[-1].get("updated_ts", 0)) < 7200
+        and len(sessions[-1].get("turns", [])) < 16
+    ):
+        cur = sessions[-1]
+    else:
+        title = u[:48] + ("…" if len(u) > 48 else "")
+        cur = {
+            "id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "date": datetime.now().strftime("%d.%m.%Y %H:%M"),
+            "updated_ts": now,
+            "title": title,
+            "turns": [],
+        }
+        sessions.append(cur)
+
+    cur["updated_ts"] = now
+    cur.setdefault("turns", []).append({
+        "time": datetime.now().strftime("%H:%M"),
+        "user": u,
+        "assistant": a,
+        "model": model or "",
+    })
+    _save_sessions(sessions)
+
+
 def emit_event(event_type: str, **payload) -> None:
     """Daemon ve TUI arasında gerçek zamanlı olay paylaşımı."""
     ensure_dirs()
@@ -191,6 +257,12 @@ def emit_event(event_type: str, **payload) -> None:
         if EVENTS_FILE.stat().st_size > 256 * 1024:
             lines = EVENTS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()[-150:]
             EVENTS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        if event_type in ("assistant", "chat_turn"):
+            _record_session_turn(
+                payload.get("user_text", ""),
+                payload.get("text", ""),
+                payload.get("model"),
+            )
     except Exception as e:
         log_.debug("event yazılamadı: %s", e)
 
@@ -547,7 +619,7 @@ class MetroAssistantTUI:
         )
         line2 = (
             f"{GRAY}Komut:{RESET} {WHITE}/model{RESET} {GRAY}•{RESET} "
-            f"{WHITE}/api{RESET} {GRAY}•{RESET} {WHITE}/voice{RESET} {GRAY}•{RESET} "
+            f"{WHITE}/yeni{RESET} {GRAY}•{RESET} {WHITE}/gecmis{RESET} {GRAY}•{RESET} "
             f"{WHITE}/hafiza{RESET} {GRAY}•{RESET} {WHITE}/ayarlar{RESET} {GRAY}•{RESET} {WHITE}/help{RESET}"
         )
 
@@ -863,10 +935,11 @@ class MetroAssistantTUI:
             print(f"    {CYAN}7){RESET} Özel Slash Komutları   : {WHITE}{aliases_disp}{RESET}")
             print(f"    {CYAN}8){RESET} Uyandırma Çan Sesi     : {GREEN if self.s.chime else GRAY}{'Açık' if self.s.chime else 'Kapalı'}{RESET}")
             print(f"    {CYAN}9){RESET} Sistem Komutu Onayı    : {GREEN if self.s.confirm_dangerous else YELLOW}{'Açık (Güvenli)' if self.s.confirm_dangerous else 'Kapalı'}{RESET}")
+            print(f"   {CYAN}10){RESET} Sohbet Geçmişi Kaydı   : {GREEN if self.s.save_history else GRAY}{'Açık (/gecmis)' if self.s.save_history else 'Kapalı (Gizli Mod)'}{RESET}")
             print(f"    {CYAN}0){RESET} Kaydet ve Çık\n")
 
             try:
-                c = input(_rl_prompt(f"  {ORANGE}{BOLD}Değiştirmek istediğin ayar (1-9 / 0) [0]: {RESET}")).strip()
+                c = input(_rl_prompt(f"  {ORANGE}{BOLD}Değiştirmek istediğin ayar (1-10 / 0) [0]: {RESET}")).strip()
             except (EOFError, KeyboardInterrupt):
                 print()
                 break
@@ -910,6 +983,10 @@ class MetroAssistantTUI:
                 self.s.confirm_dangerous = not self.s.confirm_dangerous
                 save(self.s)
                 print(f"  {GREEN}✓ Tehlikeli komut onayı {'açıldı' if self.s.confirm_dangerous else 'kapatıldı'}.{RESET}")
+            elif c == "10":
+                self.s.save_history = not self.s.save_history
+                save(self.s)
+                print(f"  {GREEN}✓ Sohbet geçmişi kaydı {'açıldı' if self.s.save_history else 'kapatıldı'}.{RESET}")
 
         self.render_header(clear_screen=False)
 
@@ -1005,6 +1082,97 @@ class MetroAssistantTUI:
         print(f"    {WHITE}/hafiza ekle <bilgi>{RESET}    Yeni bilgi ekle")
         print(f"    {WHITE}/hafiza sil <no|kelime>{RESET} Bilgiyi sil")
         print(f"    {WHITE}/hafiza temizle{RESET}         Tüm hafızayı sıfırla\n")
+
+    # ---------- İsteğe Bağlı Sohbet Geçmişi (/gecmis) ----------
+    def _manage_history(self, arg: str = "") -> None:
+        self.s = load()
+        arg = arg.strip()
+        low = arg.lower()
+
+        if low in ("ac", "aç", "on", "aktif"):
+            self.s.save_history = True
+            save(self.s)
+            print(f"\n  {GREEN}✓{RESET} Sohbet geçmişi kaydı {BOLD}AÇILDI{RESET}.\n")
+            return
+
+        if low in ("kapat", "off", "pasif", "gizli"):
+            self.s.save_history = False
+            save(self.s)
+            print(f"\n  {GREEN}✓{RESET} Sohbet geçmişi kaydı {BOLD}KAPATILDI{RESET} (yeni sohbetler kaydedilmeyecek).\n")
+            return
+
+        if low in ("temizle", "clear", "sifirla", "sıfırla"):
+            SESSIONS_FILE.unlink(missing_ok=True)
+            EVENTS_FILE.unlink(missing_ok=True)
+            self.agent.history.clear()
+            print(f"\n  {GREEN}✓{RESET} Tüm kayıtlı sohbet geçmişi temizlendi.\n")
+            return
+
+        sessions = list(reversed(_load_sessions()))
+
+        if low.startswith(("sil ", "del ", "rm ")):
+            q = arg.split(maxsplit=1)[1].strip()
+            if q.isdigit() and 1 <= int(q) <= len(sessions):
+                target_id = sessions[int(q) - 1].get("id")
+                raw_all = [s for s in _load_sessions() if s.get("id") != target_id]
+                _save_sessions(raw_all)
+                print(f"\n  {GREEN}✓{RESET} #{q} numaralı sohbet geçmişten silindi.\n")
+            else:
+                print(f"\n  {YELLOW}Geçerli bir sohbet numarası gir (/gecmis sil 1).{RESET}\n")
+            return
+
+        if arg.isdigit() and 1 <= int(arg) <= len(sessions):
+            chosen = sessions[int(arg) - 1]
+            self.render_header(clear_screen=True)
+            print(f"  {CYAN}{BOLD}📂 Sohbet Yüklendi:{RESET} {WHITE}{chosen.get('title', '')}{RESET} {GRAY}({chosen.get('date', '')}){RESET}\n")
+            self.agent.history.clear()
+            for t in chosen.get("turns", []):
+                u = t.get("user", "")
+                a = t.get("assistant", "")
+                m = t.get("model") or None
+                print(f"{CYAN}{BOLD}● Sen:{RESET} {WHITE}{u}{RESET}")
+                tag = f" {GRAY}[{m}]{RESET}" if m else ""
+                print(f"{ORANGE}{BOLD}◆ Metro{RESET}{tag}\n  {WHITE}{a}{RESET}\n")
+                self.agent.history.append((u, a))
+            return
+
+        st_badge = f"{GREEN}AÇIK{RESET}" if self.s.save_history else f"{YELLOW}KAPALI (Gizli Mod){RESET}"
+        print(f"\n  {BOLD}🕒 Sohbet Geçmişi (Durum: {st_badge}{BOLD}):{RESET}")
+        if not sessions:
+            print(f"  {GRAY}Henüz kaydedilmiş bir sohbet geçmişi yok.{RESET}")
+        else:
+            for idx, sess in enumerate(sessions[:12], 1):
+                cnt = len(sess.get("turns", []))
+                dt = sess.get("date", "")
+                title = sess.get("title", "Sohbet")
+                print(f"    {CYAN}{idx:>2}){RESET} {GRAY}[{dt}]{RESET} {WHITE}{title:<42}{RESET} {GRAY}({cnt} mesaj){RESET}")
+
+        print(f"\n    {CYAN}y){RESET} Yeni temiz sohbet başlat (/yeni)")
+        print(f"    {CYAN}k){RESET} Sohbet geçmişi kaydını {'Kapat' if self.s.save_history else 'Aç'}")
+        print(f"    {CYAN}t){RESET} Tüm sohbet geçmişini temizle")
+        print(f"    {CYAN}0){RESET} Kapat\n")
+
+        try:
+            pick = input(_rl_prompt(f"  {ORANGE}{BOLD}Görüntülemek/devam etmek istediğin sohbet (1-{len(sessions[:12])} / y / k / t / 0) [0]: {RESET}")).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+
+        if not pick or pick == "0":
+            print()
+            return
+        if pick == "y":
+            self._handle_slash("/yeni")
+            return
+        if pick == "k":
+            self._manage_history("kapat" if self.s.save_history else "ac")
+            return
+        if pick == "t":
+            self._manage_history("temizle")
+            return
+        if pick.isdigit() and 1 <= int(pick) <= len(sessions[:12]):
+            self._manage_history(pick)
+            return
 
     # ---------- Provider / API Bağlama ve Model Çekme Sihirbazı ----------
     def _pull_provider_models(self, pid: str | None = None) -> None:
@@ -1195,6 +1363,8 @@ class MetroAssistantTUI:
             print(f"  {CYAN}/voice{RESET} {GRAY}(veya /v){RESET}      Ses profilini numaralı menüden seç veya test et")
             print(f"  {CYAN}/hotkey{RESET} {GRAY}(veya /tus){RESET}   Konuşmak için anahtar tuş ata veya kaldır")
             print(f"  {CYAN}/wake <kelimeler>{RESET}   Uyandırma kelimelerini özelleştir (örn: {WHITE}/wake metro, asistan{RESET})")
+            print(f"  {CYAN}/yeni{RESET} {GRAY}(veya /new){RESET}     Yeni temiz sohbet başlat (arka plan oturumunu da yeniler)")
+            print(f"  {CYAN}/gecmis{RESET} {GRAY}(veya /his){RESET}   İsteğe bağlı sohbet geçmişini görüntüle, devam et veya aç/kapat")
             print(f"  {CYAN}/hafiza{RESET} {GRAY}(veya /mem){RESET}    Kalıcı hafızayı görüntüle, bilgi ekle veya sil (düşük token)")
             print(f"  {CYAN}/prompt <talimat>{RESET}   Metro'nun kişiliğini/konuşma tarzını özelleştir")
             print(f"  {CYAN}/komut{RESET} {GRAY}(veya /alias){RESET}  Kendi özel slash komutlarını oluştur (örn: {WHITE}/komut ekle /ozet ...{RESET})")
@@ -1225,6 +1395,18 @@ class MetroAssistantTUI:
 
         if cmd in ("/hafiza", "/hafıza", "/memory", "/mem", "/bellek"):
             self._manage_memory(arg)
+            return True
+
+        if cmd in ("/gecmis", "/geçmiş", "/history", "/his", "/sohbetler"):
+            self._manage_history(arg)
+            return True
+
+        if cmd in ("/yeni", "/new", "/reset"):
+            self.agent.history.clear()
+            self.chain.reset_session()
+            start_new_chat_session()
+            self.render_header(clear_screen=True)
+            print(f"  {GREEN}✓{RESET} Yeni temiz sohbet başlatıldı (kalıcı hafızan korunuyor).\n")
             return True
 
         if cmd in ("/prompt", "/persona", "/sistem", "/system"):
@@ -1295,6 +1477,8 @@ class MetroAssistantTUI:
 
         if cmd == "/clear":
             self.agent.history.clear()
+            self.chain.reset_session()
+            start_new_chat_session()
             self.render_header(clear_screen=True)
             return True
 
@@ -1533,11 +1717,12 @@ class MetroAssistantTUI:
                 sys.stdout.flush()
             except Exception:
                 pass
-            try:
-                readline.set_history_length(200)
-                readline.write_history_file(str(HISTORY_FILE))
-            except Exception:
-                pass
+            if self.s.save_history:
+                try:
+                    readline.set_history_length(200)
+                    readline.write_history_file(str(HISTORY_FILE))
+                except Exception:
+                    pass
             try:
                 if TUI_PID_FILE.exists() and TUI_PID_FILE.read_text().strip() == str(os.getpid()):
                     TUI_PID_FILE.unlink(missing_ok=True)
