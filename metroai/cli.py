@@ -161,8 +161,22 @@ def cmd_setup(args) -> int:
         s.voice = tts.resolve_voice(v_pick).alias
     _ok(f"Ses profili: {s.voice}")
 
-    # --- 3) Uyandırma Kelimesi & Konuşma Tarzı ---
-    print(f"\n  {BOLD}[3/5] 🗣️ Uyandırma Kelimesi ve Konuşma Tarzı{RESET}")
+    # --- 3) Kullanıcı Adı, Uyandırma Kelimesi & Konuşma Tarzı ---
+    print(f"\n  {BOLD}[3/5] 🗣️ Kullanıcı Adı, Uyandırma Kelimesi ve Konuşma Tarzı{RESET}")
+    uname_raw = _ask(
+        f"  {ORANGE}Adın / Kullanıcı ismin (sohbet satırında görünür, boş bırakırsan isim yazmaz){RESET}",
+        s.user_name,
+    ).strip()
+    if uname_raw.lower() in ("yok", "boş", "bos", "-", "sil", "none"):
+        uname_raw = ""
+    s.user_name = uname_raw
+    if s.user_name:
+        from . import memory
+        memory.set_profile("isim", s.user_name)
+        _ok(f"Kullanıcı adı: {s.user_name} ({s.user_name} ❯)")
+    else:
+        _ok("Kullanıcı adı: Boş (yalnızca ❯ görünecek)")
+
     words = _ask(f"  {ORANGE}Metro'yu hangi kelimeyle çağırmak istersin? (virgülle birden fazla yazabilirsin){RESET}", ", ".join(s.wake_words))
     s.wake_words = [w.strip().lower() for w in words.split(",") if w.strip()] or ["metro"]
     _ok(f"Uyandırma kelimeleri: {', '.join(s.wake_words)}")

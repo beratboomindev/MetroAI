@@ -38,6 +38,7 @@ class Provider:
 @dataclass
 class Settings:
     name: str = "Metro"
+    user_name: str = ""
     wake_words: list[str] = field(default_factory=lambda: ["metro"])
     language: str = "tr"
     voice: str = "metro"
@@ -136,6 +137,7 @@ def load() -> Settings:
     s.raw = data
     a = data.get("assistant", {})
     s.name = a.get("name", s.name)
+    s.user_name = str(a.get("user_name", s.user_name)).strip()
     s.wake_words = [w.lower() for w in a.get("wake_words", s.wake_words)]
     s.language = a.get("language", s.language)
     s.voice = a.get("voice", s.voice)
@@ -212,6 +214,7 @@ def render_config(s: Settings) -> str:
     lines.append("# Metro yapılandırması — `./metro setup` ile yeniden oluşturabilirsin.\n")
     lines.append("[assistant]")
     lines.append(f"name = {_toml_str(s.name)}")
+    lines.append(f"user_name = {_toml_str(s.user_name)}")
     lines.append(f"wake_words = {_toml_list(s.wake_words)}")
     lines.append(f"language = {_toml_str(s.language)}")
     lines.append(f"voice = {_toml_str(s.voice)}")

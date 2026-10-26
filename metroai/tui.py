@@ -645,6 +645,12 @@ class MetroAssistantTUI:
             sys.stdout.write("\n")
             sys.stdout.flush()
 
+    def _user_prompt(self) -> str:
+        u = (self.s.user_name or "").strip()
+        if u:
+            return f"{CYAN}{BOLD}{u} ❯{RESET} "
+        return f"{CYAN}{BOLD}❯{RESET} "
+
     def _async_print(self, block: str) -> None:
         with self._print_lock:
             if self._in_prompt:
@@ -654,12 +660,14 @@ class MetroAssistantTUI:
                 try:
                     readline.forced_update_display()
                 except Exception:
-                    sys.stdout.write(f"{CYAN}{BOLD}metro ❯{RESET} ")
+                    sys.stdout.write(self._user_prompt())
             sys.stdout.flush()
 
     def print_user_voice(self, text: str, source: str = "stt") -> None:
+        u = (self.s.user_name or "").strip()
+        label = f"● {u} ({source}):" if u else f"● ({source}):"
         self._async_print(
-            f"{CYAN}{BOLD}● Sen ({source}):{RESET} {WHITE}{text}{RESET}"
+            f"{CYAN}{BOLD}{label}{RESET} {WHITE}{text}{RESET}"
         )
 
     def print_assistant(self, text: str, model: str | None = None) -> None:
@@ -925,6 +933,8 @@ class MetroAssistantTUI:
             prompt_disp = (self.s.custom_prompt[:40] + "…") if len(self.s.custom_prompt) > 40 else (self.s.custom_prompt or "Varsayılan")
             aliases_disp = ", ".join(self.s.aliases.keys()) if self.s.aliases else "Yok"
 
+            user_disp = self.s.user_name.strip() if self.s.user_name.strip() else "Boş (Yalnızca ❯)"
+
             print(f"\n  {BOLD}⚙ Metro Assistant — Özelleştirme ve Ayarlar Merkezi:{RESET}")
             print(f"    {CYAN}1){RESET} Aktif LLM Modeli       : {GREEN}{self._active_model_display()}{RESET}")
             print(f"    {CYAN}2){RESET} Ses Profili (TTS)      : {WHITE}{self.s.voice}{RESET}")
@@ -936,10 +946,11 @@ class MetroAssistantTUI:
             print(f"    {CYAN}8){RESET} Uyandırma Çan Sesi     : {GREEN if self.s.chime else GRAY}{'Açık' if self.s.chime else 'Kapalı'}{RESET}")
             print(f"    {CYAN}9){RESET} Sistem Komutu Onayı    : {GREEN if self.s.confirm_dangerous else YELLOW}{'Açık (Güvenli)' if self.s.confirm_dangerous else 'Kapalı'}{RESET}")
             print(f"   {CYAN}10){RESET} Sohbet Geçmişi Kaydı   : {GREEN if self.s.save_history else GRAY}{'Açık (/gecmis)' if self.s.save_history else 'Kapalı (Gizli Mod)'}{RESET}")
+            print(f"   {CYAN}11){RESET} Kullanıcı İsmi (/isim) : {WHITE}{user_disp}{RESET}")
             print(f"    {CYAN}0){RESET} Kaydet ve Çık\n")
 
             try:
-                c = input(_rl_prompt(f"  {ORANGE}{BOLD}Değiştirmek istediğin ayar (1-10 / 0) [0]: {RESET}")).strip()
+                c = input(_rl_prompt(f"  {ORANGE}{BOLD}Değiştirmek istediğin ayar (1-11 / 0) [0]: {RESET}")).strip()
             except (EOFError, KeyboardInterrupt):
                 print()
                 break
@@ -987,6 +998,20 @@ class MetroAssistantTUI:
                 self.s.save_history = not self.s.save_history
                 save(self.s)
                 print(f"  {GREEN}✓ Sohbet geçmişi kaydı {'açıldı' if self.s.save_history else 'kapatıldı'}.{RESET}")
+            elif c == "11":
+                try:
+                    u_in = input(f"  {CYAN}Kullanıcı ismin (boş bırakırsan isim yazmaz): {RESET}").strip()
+                    if u_in.lower() in ("yok", "boş", "bos", "-", "sil", "none"):
+                        u_in = ""
+                    self.s.user_name = u_in
+                    save(self.s)
+                    if u_in:
+                        memory.set_profile("isim", u_in)
+                        print(f"  {GREEN}✓ Kullanıcı ismi '{u_in}' olarak kaydedildi.{RESET}")
+                    else:
+                        print(f"  {GREEN}✓ Kullanıcı ismi kaldırıldı (yalnızca ❯ görünecek).{RESET}")
+                except (EOFError, KeyboardInterrupt):
+                    pass
 
         self.render_header(clear_screen=False)
 
@@ -1130,7 +1155,9 @@ class MetroAssistantTUI:
                 u = t.get("user", "")
                 a = t.get("assistant", "")
                 m = t.get("model") or None
-                print(f"{CYAN}{BOLD}● Sen:{RESET} {WHITE}{u}{RESET}")
+                uname = (self.s.user_name or "").strip()
+                ulabel = f"● {uname}:" if uname else "●"
+                print(f"{CYAN}{BOLD}{ulabel}{RESET} {WHITE}{u}{RESET}")
                 tag = f" {GRAY}[{m}]{RESET}" if m else ""
                 print(f"{ORANGE}{BOLD}◆ Metro{RESET}{tag}\n  {WHITE}{a}{RESET}\n")
                 self.agent.history.append((u, a))
@@ -1409,6 +1436,24 @@ class MetroAssistantTUI:
             print(f"  {GREEN}✓{RESET} Yeni temiz sohbet başlatıldı (kalıcı hafızan korunuyor).\n")
             return True
 
+        if cmd in ("/isim", "/ad", "/name", "/user"):
+            if not arg:
+                cur_u = self.s.user_name.strip() or "(Boş — yalnızca ❯ görünüyor)"
+                print(f"\n  {BOLD}Aktif Kullanıcı İsmi:{RESET} {WHITE}{cur_u}{RESET}")
+                print(f"  {GRAY}Değiştirmek için: {WHITE}/isim Berat{RESET}")
+                print(f"  {GRAY}Kaldırmak için  : {WHITE}/isim sil{RESET}\n")
+                return True
+            if arg.lower() in ("sil", "yok", "boş", "bos", "-", "reset", "off", "none"):
+                self.s.user_name = ""
+                save(self.s)
+                print(f"\n  {GREEN}✓{RESET} Kullanıcı ismi kaldırıldı (yalnızca {CYAN}❯{RESET} görünecek).\n")
+                return True
+            self.s.user_name = arg.strip()
+            save(self.s)
+            memory.set_profile("isim", self.s.user_name)
+            print(f"\n  {GREEN}✓{RESET} Kullanıcı ismi {BOLD}{self.s.user_name}{RESET} olarak ayarlandı ({CYAN}{self.s.user_name} ❯{RESET}).\n")
+            return True
+
         if cmd in ("/prompt", "/persona", "/sistem", "/system"):
             if not arg:
                 cur = self.s.custom_prompt or "(Varsayılan — özel talimat yok)"
@@ -1663,7 +1708,7 @@ class MetroAssistantTUI:
                     prompt_str = (
                         f"  {ORANGE}{BOLD}👉 Onaylıyor musun? [E]vet (Enter) / [H]ayır (E/h): {RESET}"
                         if self._awaiting_daemon_confirm
-                        else f"{CYAN}{BOLD}metro ❯{RESET} "
+                        else self._user_prompt()
                     )
                     user_in = input(_rl_prompt(prompt_str)).strip()
                     self._in_prompt = False
