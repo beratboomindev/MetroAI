@@ -116,14 +116,6 @@ DEFAULT_PROVIDERS: list[dict[str, Any]] = [
         "api_key_env": "MISTRAL_API_KEY",
         "models": ["mistral-small-latest", "open-mistral-nemo"],
     },
-    {
-        # Anahtarsız, tamamen ücretsiz yedek. Kimlik gerektirmez.
-        "id": "pollinations",
-        "base_url": "https://text.pollinations.ai/openai",
-        "api_key_env": "",
-        "models": ["openai-fast"],
-        "keyless": True,
-    },
 ]
 
 

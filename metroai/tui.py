@@ -402,6 +402,8 @@ def ensure_always_on_top_rule(enabled: bool = True) -> None:
                 ("Description", "Metro Assistant Pencere Kurali"),
                 ("wmclass", "metro-assistant"),
                 ("wmclassmatch", "1"),
+                ("wmclasscomplete", "true"),
+                ("types", "1"),
                 ("above", "true" if enabled else "false"),
                 # aboverule=2 (Force) açık olan pencerenin de Her Zaman Üstte durumunu anında değiştirir
                 ("aboverule", "2"),
@@ -439,6 +441,101 @@ def ensure_always_on_top_rule(enabled: bool = True) -> None:
             pass
 
 
+def raise_metro_window() -> bool:
+    """Açık olan Metro Assistant penceresini öne (focus) getirir ve simge durumundan çıkarır."""
+    title = "Metro Assistant"
+    # 1) wmctrl
+    if shutil.which("wmctrl"):
+        rc = subprocess.run(["wmctrl", "-a", title], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+        if rc == 0:
+            return True
+        rc2 = subprocess.run(["wmctrl", "-x", "-a", "metro-assistant"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+        if rc2 == 0:
+            return True
+
+    # 2) xdotool
+    if shutil.which("xdotool"):
+        try:
+            r = subprocess.run(["xdotool", "search", "--name", title], capture_output=True, text=True, timeout=3)
+            if r.returncode == 0 and r.stdout.strip():
+                wid = r.stdout.strip().splitlines()[-1]
+                subprocess.run(["xdotool", "windowactivate", "--sync", wid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+        except Exception:
+            pass
+
+    # 3) KDE KWin D-Bus scripting
+    for qdbus_bin in ("qdbus6", "qdbus"):
+        if shutil.which(qdbus_bin):
+            try:
+                script = (
+                    'workspace.windowList().forEach(function(w) {'
+                    '  if (w.caption.indexOf("Metro Assistant") !== -1 || w.resourceClass === "metro-assistant") {'
+                    '    workspace.activeWindow = w;'
+                    '  }'
+                    '});'
+                )
+                subprocess.run(
+                    [qdbus_bin, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.loadScript", "/dev/stdin", "metro_raise"],
+                    input=script,
+                    text=True,
+                    timeout=3,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+    return False
+
+
+def _ensure_metro_kitty_conf() -> Path:
+    """Metro için izole Kitty yapılandırması oluşturur.
+    Kullanıcının ~/.config/kitty/kitty.conf dosyasını ve pencere düzenini asla bozmaz.
+    Ayrıca tam kopyala-yapıştır ve fare seçim desteği sağlar.
+    """
+    conf_dir = Path.home() / ".config" / "metro" / "kitty"
+    conf_dir.mkdir(parents=True, exist_ok=True)
+    conf_path = conf_dir / "kitty.conf"
+    content = """# Metro Assistant Özel Klonlanmış Kitty Yapılandırması
+# Normal kitty.conf dosyasını asla bozmaz, tamamen bağımsızdır.
+
+font_family                  GeistMono Nerd Font Mono
+font_size                    15
+bold_font                    auto
+italic_font                  auto
+bold_italic_font             auto
+remember_window_size         no
+initial_window_width         920
+initial_window_height        580
+cursor_blink_interval        0.5
+cursor_stop_blinking_after   1
+cursor_trail                 1
+cursor_trail_decay           0.1 0.4
+cursor_trail_start_threshold 6
+scrollback_lines             2000
+enable_audio_bell            no
+window_padding_width         10
+hide_window_decorations      no
+background_opacity           0.95
+dynamic_background_opacity   yes
+confirm_os_window_close      0
+linux_display_server         wayland
+
+#----------Pano & Kopyala - Yapıştır Eşlemeleri---------#
+copy_on_select               clipboard
+map ctrl+v                   paste_from_clipboard
+map ctrl+shift+v             paste_from_clipboard
+map ctrl+shift+c             copy_to_clipboard
+mouse_map right press ungrabbed paste_from_clipboard
+mouse_map middle press ungrabbed paste_from_selection
+"""
+    try:
+        conf_path.write_text(content, encoding="utf-8")
+    except Exception:
+        pass
+    return conf_path
+
+
 def ensure_terminal_open(settings: Settings | None = None) -> bool:
     """Açık bir Metro Assistant penceresi yoksa her zaman üstte duran yeni bir pencere açar."""
     s = load() if settings is None else load()
@@ -446,6 +543,7 @@ def ensure_terminal_open(settings: Settings | None = None) -> bool:
     ensure_always_on_top_rule(s.always_on_top)
 
     if is_tui_running():
+        raise_metro_window()
         return True
 
     if not s.auto_open_terminal:
@@ -454,32 +552,28 @@ def ensure_terminal_open(settings: Settings | None = None) -> bool:
     metro_bin = str(ROOT / "metro")
     title = "Metro Assistant"
 
+    metro_kitty_conf = str(_ensure_metro_kitty_conf())
     kitty_cmd = [
         "kitty",
+        "--config",
+        metro_kitty_conf,
         "--title",
         title,
-        "--app-id",
-        "metro-assistant",
         "--class",
         "metro-assistant",
-        "-o",
-        "initial_window_width=920",
-        "-o",
-        "initial_window_height=580",
-        "-o",
-        "remember_window_size=no",
         metro_bin,
         "chat",
     ]
-    candidates: list[tuple[str, list[str]]] = [
-        ("kitty", kitty_cmd),
-        ("konsole", ["konsole", "--name", "metro-assistant", "-p", f"tabtitle={title}", "-e", metro_bin, "chat"]),
-        ("alacritty", ["alacritty", "--title", title, "--class", "metro-assistant,metro-assistant", "-e", metro_bin, "chat"]),
-        ("foot", ["foot", f"--title={title}", "--app-id=metro-assistant", metro_bin, "chat"]),
-        ("ghostty", ["ghostty", f"--title={title}", "--class=metro-assistant", "-e", metro_bin, "chat"]),
-        ("wezterm", ["wezterm", "start", "--class", "metro-assistant", "--", metro_bin, "chat"]),
-        ("xterm", ["xterm", "-T", title, "-class", "metro-assistant", "-e", metro_bin, "chat"]),
-    ]
+
+    candidates: list[tuple[str, list[str]]] = []
+    candidates.append(("kitty", kitty_cmd))
+    if shutil.which("konsole"):
+        candidates.append(("konsole", ["konsole", "--separate", "-p", f"tabtitle={title}", "-e", metro_bin, "chat"]))
+    candidates.append(("alacritty", ["alacritty", "--title", title, "--class", "metro-assistant,metro-assistant", "-e", metro_bin, "chat"]))
+    candidates.append(("foot", ["foot", f"--title={title}", "--app-id=metro-assistant", metro_bin, "chat"]))
+    candidates.append(("ghostty", ["ghostty", f"--title={title}", "--class=metro-assistant", "-e", metro_bin, "chat"]))
+    candidates.append(("wezterm", ["wezterm", "start", "--class", "metro-assistant", "--", metro_bin, "chat"]))
+    candidates.append(("xterm", ["xterm", "-T", title, "-class", "metro-assistant", "-e", metro_bin, "chat"]))
 
     pref = (s.terminal or "auto").strip().lower()
     if pref and pref != "auto":
@@ -490,13 +584,17 @@ def ensure_terminal_open(settings: Settings | None = None) -> bool:
         if not shutil.which(name):
             continue
         try:
-            subprocess.Popen(
+            p = subprocess.Popen(
                 cmd,
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
+            time.sleep(0.2)
+            if p.poll() is not None and p.returncode != 0:
+                log_.warning("terminal (%s) başlatılamadı (hata kodu %d), sıradakine geçiliyor", name, p.returncode)
+                continue
             log_.info("Metro Assistant terminali başlatıldı (%s)", name)
             return True
         except Exception as e:
@@ -1398,6 +1496,9 @@ class MetroAssistantTUI:
             print(f"  {CYAN}/ayarlar{RESET} {GRAY}(veya /set){RESET}  Tüm ayarları tek menüden görüntüle ve değiştir")
             print(f"  {CYAN}/top{RESET}                Pencereyi her zaman üstte tutma modunu aç/kapat")
             print(f"  {CYAN}/speak{RESET}              Yazılı sohbette sesli okumayı aç/kapat")
+            print(f"  {CYAN}/ekran <soru>{RESET}        Mevcut ekranı multimodal yapay zeka/OCR ile analiz et")
+            print(f"  {CYAN}/kopyala{RESET} {GRAY}(veya /c){RESET}    Son asistan cevabını sistem panosuna kopyala")
+            print(f"  {CYAN}/yapistir{RESET} {GRAY}(veya /p){RESET}   Sistem panosundaki metni yapıştır ve gönder")
             print(f"  {CYAN}/listen{RESET}             Mikrofondan hemen sesli komut dinle (ESC ile iptal)")
             print(f"  {CYAN}/sh <komut>{RESET}         Terminal komutu çalıştır")
             print(f"  {CYAN}/clear{RESET}              Ekranı temizle ve üst kutuyu yenile")
@@ -1434,6 +1535,26 @@ class MetroAssistantTUI:
             start_new_chat_session()
             self.render_header(clear_screen=True)
             print(f"  {GREEN}✓{RESET} Yeni temiz sohbet başlatıldı (kalıcı hafızan korunuyor).\n")
+            return True
+
+        if cmd in ("/kopyala", "/copy", "/c", "/pano"):
+            if self.agent.history:
+                last_reply = self.agent.history[-1][1]
+                tools.clipboard_set({"text": last_reply}, self.ctx)
+                print(f"  {GREEN}✓{RESET} Son yanıt panoya kopyalandı.\n")
+            else:
+                print(f"  {YELLOW}Kopyalanacak bir yanıt henüz yok.{RESET}\n")
+            return True
+
+        if cmd in ("/yapistir", "/paste", "/p"):
+            clip_res = tools.clipboard_get({}, self.ctx)
+            prefix = "Panoda şu yazıyor: "
+            if clip_res.startswith(prefix):
+                raw_clip = clip_res[len(prefix):]
+                print(f"  {CYAN}📋 Panodan yapıştırıldı:{RESET} {raw_clip}\n")
+                self._run_user_message(raw_clip)
+            else:
+                print(f"  {YELLOW}Pano boş veya okunamadı.{RESET}\n")
             return True
 
         if cmd in ("/isim", "/ad", "/name", "/user"):
@@ -1518,6 +1639,13 @@ class MetroAssistantTUI:
             ensure_always_on_top_rule(self.s.always_on_top)
             st = "AÇIK (pencere her zaman üstte)" if self.s.always_on_top else "KAPALI (normal pencere)"
             print(f"\n  {GREEN}✓{RESET} Her zaman üstte modu: {BOLD}{st}{RESET}\n")
+            return True
+
+        if cmd in ("/ekran", "/screen", "/vision", "/gor", "/gör"):
+            q = arg or "Ekrandaki içeriği, açık olan pencereleri veya hata mesajlarını incele."
+            print(f"  {CYAN}📸 Ekran görüntüsü alınıyor ve multimodal model ile inceleniyor...{RESET}")
+            res = tools.analyze_screen({"question": q}, self.ctx)
+            print(f"\n{WHITE}{res}{RESET}\n")
             return True
 
         if cmd == "/clear":
@@ -1614,7 +1742,7 @@ class MetroAssistantTUI:
                 return
             self.print_user_voice(text, src)
             tts.prewarm()
-            reply = self.agent.handle(text)
+            reply = self.agent.handle(text, is_voice=self.speak_replies)
             emit_event(
                 "chat_turn",
                 origin="tui",
@@ -1647,7 +1775,7 @@ class MetroAssistantTUI:
         self.chain.s = self.s
         self.agent.s = self.s
 
-        reply = self.agent.handle(user_in)
+        reply = self.agent.handle(user_in, is_voice=self.speak_replies)
         self._status_override = "hazır"
         self._set_window_title("hazır")
         sys.stdout.write("\r\033[K")
@@ -1689,6 +1817,7 @@ class MetroAssistantTUI:
         try:
             if HISTORY_FILE.exists():
                 readline.read_history_file(str(HISTORY_FILE))
+            readline.parse_and_bind("set enable-bracketed-paste on")
         except Exception:
             pass
 

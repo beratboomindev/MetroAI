@@ -122,10 +122,15 @@ def format_hotkey(spec: str) -> str:
 
 
 def trigger_cancel() -> None:
-    """Aktif dinlemeyi iptal etmek için sinyal yazar."""
+    """Aktif dinlemeyi iptal etmek için sinyal yazar ve konuşmayı anında susturur (Barge-in)."""
     try:
         CANCEL_FILE.parent.mkdir(parents=True, exist_ok=True)
         CANCEL_FILE.write_text(str(time.time()), encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        from . import audio
+        audio.stop_playback()
     except Exception:
         pass
     if _GLOBAL_WATCHER is not None:

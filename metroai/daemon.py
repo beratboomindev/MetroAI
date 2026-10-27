@@ -174,6 +174,7 @@ class Runtime(tools.Ctx):
         log_.info("Metro kapatıldı.")
 
     def _on_wake(self) -> None:
+        was_media_playing = False
         try:
             # Sesi veya ayarları terminalden değiştirilmiş olabilir, güncel tut
             try:
@@ -184,6 +185,11 @@ class Runtime(tools.Ctx):
                 self.keys.set_hotkey(latest.hotkey)
             except Exception:
                 pass
+
+            # Hoparlörden gelen müziğin mikrofona yankı yapmasını önlemek için çalmayı geçici duraklat
+            was_media_playing = tools.is_media_playing()
+            if was_media_playing:
+                tools.pause_media()
 
             # Hey Metro denildiğinde Metro Assistant terminal penceresini aç (açık değilse)
             self._set_state("dinliyor")
@@ -197,6 +203,8 @@ class Runtime(tools.Ctx):
                     "Henüz hiçbir API çekmemişsin. Önce bir sağlayıcı bağlayalım. "
                     "Açılan Metro Assistant penceresinden hemen seçebilirsin."
                 )
+                if was_media_playing:
+                    tools.resume_media()
                 return
 
             if self.s.chime:
@@ -219,6 +227,8 @@ class Runtime(tools.Ctx):
                     log_.info("dinleme ESC ile iptal edildi")
                 else:
                     log_.info("komut gelmedi")
+                if was_media_playing:
+                    tools.resume_media()
                 self._set_state("hazır")
                 return
 
@@ -230,6 +240,8 @@ class Runtime(tools.Ctx):
             log_.info("duyulan (%s): %r", source, text)
             if not text:
                 self.say("Seni duyamadım.")
+                if was_media_playing:
+                    tools.resume_media()
                 return
 
             tui.emit_event("user_voice", origin="daemon", source=source, text=text)
@@ -240,8 +252,14 @@ class Runtime(tools.Ctx):
                 self.agent.history.clear()
                 for u, a in turns:
                     self.agent.history.append((u, a))
-            reply = self.agent.handle(text)
+            reply = self.agent.handle(text, is_voice=True)
             log_.info("yanıt: %s", reply)
+
+            low_text = text.lower()
+            user_stopped_media = any(w in low_text for w in ("dur", "durdur", "kes", "kapat", "sus", "pause")) or any(
+                w in reply.lower() for w in ("durdurdum", "kapattım", "durduruldu")
+            )
+
             self.say(
                 reply,
                 on_start=lambda: tui.emit_event(
@@ -252,9 +270,13 @@ class Runtime(tools.Ctx):
                     model=self.chain.last_used,
                 ),
             )
+            if was_media_playing and not user_stopped_media:
+                tools.resume_media()
         except Exception:
             log_.exception("uyandırma sırasında hata")
             self.say("Bir sorun oldu.")
+            if was_media_playing:
+                tools.resume_media()
         finally:
             self.mic.flush()
             self.wake.reset()

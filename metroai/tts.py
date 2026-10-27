@@ -154,13 +154,16 @@ _MD_PATTERNS = [
 
 def resolve_voice(spec: str) -> VoicePreset:
     key = (spec or "metro").strip().lower()
-    if key == "jarvis":
-        key = "metro"
+    if key == "jarvis" or key.startswith("/") or not key:
+        return VOICE_PRESETS["metro"]
     if key in VOICE_PRESETS:
         return VOICE_PRESETS[key]
     for p in VOICE_PRESETS.values():
         if p.voice_id.lower() == key:
             return p
+    # Geçersiz veya tanınmayan ses adı girilmişse çökmek yerine varsayılan "metro" profiline dön
+    if not any(k in key for k in ("neural", "gemini", "multilingual")):
+        return VOICE_PRESETS["metro"]
     gender = "Kadın" if any(k in key for k in ("emel", "emma", "seraphina", "ava", "vivienne")) else "Erkek"
     return VoicePreset(spec, spec, "+4%", "+0Hz", gender, "Özel ses")
 
@@ -299,6 +302,7 @@ class _PrewarmedEdgeEngine:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
+                audio.register_player(proc)
             except FileNotFoundError:
                 proc = None
 
@@ -345,6 +349,8 @@ class _PrewarmedEdgeEngine:
                     proc.wait(timeout=30)
                 except Exception:
                     proc.kill()
+                finally:
+                    audio.register_player(None)
 
         # Bir sonraki konuşma için yeni WebSocket'i arka planda hemen ısıt
         asyncio.create_task(self._prewarm_coro())

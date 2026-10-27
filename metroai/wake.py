@@ -171,9 +171,17 @@ class WakeWord:
         return False
 
     def reset(self) -> None:
-        """Tanıyıcıları ve konuşmacı adaptasyonunu sıfırlar."""
-        self.rec_grammar = self._new_grammar_rec()
-        self.rec_free = self._new_free_rec()
+        """Tanıyıcıları ve konuşmacı adaptasyonunu sıfırlar (GC baskısı yapmadan)."""
+        try:
+            if self.rec_grammar is not None:
+                self.rec_grammar.Reset()
+        except Exception:
+            self.rec_grammar = self._new_grammar_rec()
+        try:
+            if self.rec_free is not None:
+                self.rec_free.Reset()
+        except Exception:
+            self.rec_free = self._new_free_rec()
         self.last_reset = time.monotonic()
 
     def _trigger(self) -> bool:
@@ -185,9 +193,18 @@ class WakeWord:
         return True
 
     def transcribe(self, wav_bytes: bytes) -> str:
-        """Yerel (çevrimdışı) yedek STT."""
+        """Yerel (çevrimdışı) yedek STT (WAV container başlığını güvenle soyar)."""
+        pcm = wav_bytes
+        if wav_bytes.startswith(b"RIFF") and len(wav_bytes) > 44:
+            try:
+                import io
+                import wave
+                with wave.open(io.BytesIO(wav_bytes), "rb") as w:
+                    pcm = w.readframes(w.getnframes())
+            except Exception:
+                pcm = wav_bytes[44:]
         rec = vosk.KaldiRecognizer(self.model, self.samplerate)
         rec.SetWords(False)
-        rec.AcceptWaveform(wav_bytes)
+        rec.AcceptWaveform(pcm)
         final = json.loads(rec.FinalResult())
         return (final.get("text") or "").strip()

@@ -88,21 +88,34 @@ def cmd_setup(args) -> int:
     print(f"  {GRAY}(Varsayılan ayarları kabul etmek için doğrudan Enter'a basabilirsin){RESET}\n")
 
     # Komut satırı bayraklarıyla doğrudan anahtar verildiyse kaydet
+    has_flag_key = False
     for p in s.providers:
         if getattr(args, "groq", None) and p.id == "groq":
-            p.api_key = args.groq
+            p.api_key = args.groq.strip()
+            p.enabled = True
+            has_flag_key = True
         elif getattr(args, "gemini", None) and p.id == "gemini":
-            p.api_key = args.gemini
+            p.api_key = args.gemini.strip()
+            p.enabled = True
+            has_flag_key = True
         elif getattr(args, "openrouter", None) and p.id == "openrouter":
-            p.api_key = args.openrouter
+            p.api_key = args.openrouter.strip()
+            p.enabled = True
+            has_flag_key = True
 
-    if args.keys_only:
+    if has_flag_key or args.keys_only:
         save(s)
-        _ok(f"Anahtarlar kaydedildi: {CONFIG_PATH}")
+        tui.mark_api_onboarded()
+        _ok(f"API anahtarları kaydedildi: {CONFIG_PATH}")
+        try:
+            subprocess.run(["systemctl", "--user", "restart", "metro.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _ok("Metro arka plan servisi yeni anahtarla güncellendi.")
+        except Exception:
+            pass
         return 0
 
     # --- 1) Sağlayıcı & Model Seçimi ---
-    print(f"  {BOLD}[1/5] 🧠 Yapay Zeka Sağlayıcısı ve Model Seçimi{RESET}")
+    print(f"  {BOLD}[1/6] 🧠 Yapay Zeka Sağlayıcısı ve Model Seçimi{RESET}")
     oc_prov = next((p for p in s.providers if p.id == "opencode"), None)
     if oc_prov:
         if not tui.is_opencode_installed():
@@ -125,13 +138,33 @@ def cmd_setup(args) -> int:
                     s.active_model = ""
                     _ok("Model modu: Otomatik Zincir")
 
-    want_extra_api = _ask(f"\n  {GRAY}Ek olarak Groq / Gemini / OpenRouter API anahtarı girmek ister misin? (e/H){RESET}", "h")
+    # --- 2) Türkçe Ses Tanıma (Groq Whisper STT — %99 Doğruluk) ---
+    print(f"\n  {BOLD}[2/6] 🎤 Türkçe Ses Tanıma Motoru (Groq Whisper STT — Şiddetle Önerilir){RESET}")
+    print(f"  {GRAY}Metro'nun konuşmanı günlük dilde (%99 doğruluk, 200ms) kusursuz anlayabilmesi için{RESET}")
+    print(f"  {GRAY}ücretsiz Groq API anahtarı önerilir. (Yerel 40MB Vosk modeli arkada yedek kalır){RESET}")
+    print(f"  {CYAN}👉 Ücretsiz API Anahtarı: https://console.groq.com/keys{RESET}")
+    groq_p = next((p for p in s.providers if p.id == "groq"), None)
+    has_groq = bool(groq_p and groq_p.api_key)
+    prompt_groq = f"  {ORANGE}Groq API anahtarını yapıştır (Enter=mevcut korunur){RESET}" if has_groq else f"  {ORANGE}Groq API anahtarını yapıştır (Enter=atla/yerel vosk){RESET}"
+    gkey = _ask_secret(prompt_groq)
+    if gkey:
+        if groq_p:
+            groq_p.api_key = gkey
+            groq_p.enabled = True
+        save(s)
+        _ok("Groq Whisper STT bağlandı! Türkçe ses tanıma maksimum hassasiyete alındı.")
+    elif has_groq:
+        _ok("Mevcut Groq API anahtarı korundu.")
+    else:
+        _info("Atlandı — Çevrimdışı küçük Vosk modeli kullanılacak.")
+
+    want_extra_api = _ask(f"\n  {GRAY}Ek olarak Gemini veya OpenRouter API anahtarı girmek ister misin? (e/H){RESET}", "h")
     if want_extra_api.lower().startswith(("e", "y")):
-        print(f"    {GRAY}• Groq       → https://console.groq.com/keys        (en hızlı LLM + Whisper STT){RESET}")
         print(f"    {GRAY}• Gemini     → https://aistudio.google.com/apikey   (geniş ücretsiz kota){RESET}")
         print(f"    {GRAY}• OpenRouter → https://openrouter.ai/keys           (onlarca :free model){RESET}")
-        for p in s.providers:
-            if p.keyless:
+        for pid in ("gemini", "openrouter"):
+            p = next((x for x in s.providers if x.id == pid), None)
+            if not p:
                 continue
             label = f"    {p.id} API anahtarı (boş bırak = atla)"
             if p.api_key:
@@ -139,14 +172,15 @@ def cmd_setup(args) -> int:
             key = _ask_secret(label)
             if key:
                 p.api_key = key
+                p.enabled = True
         if not args.no_test:
             save(s)
             _test_providers(s)
 
     tui.mark_api_onboarded()
 
-    # --- 2) Ses Profili ---
-    print(f"\n  {BOLD}[2/5] 🎙️ Ses Profili Seçimi{RESET}")
+    # --- 3) Ses Profili ---
+    print(f"\n  {BOLD}[3/6] 🎙️ Ses Profili Seçimi{RESET}")
     voice_list = tts.voices()
     cur_idx = "1"
     for idx, (alias, gender, desc) in enumerate(voice_list, 1):
@@ -161,8 +195,8 @@ def cmd_setup(args) -> int:
         s.voice = tts.resolve_voice(v_pick).alias
     _ok(f"Ses profili: {s.voice}")
 
-    # --- 3) Kullanıcı Adı, Uyandırma Kelimesi & Konuşma Tarzı ---
-    print(f"\n  {BOLD}[3/5] 🗣️ Kullanıcı Adı, Uyandırma Kelimesi ve Konuşma Tarzı{RESET}")
+    # --- 4) Kullanıcı Adı, Uyandırma Kelimesi & Konuşma Tarzı ---
+    print(f"\n  {BOLD}[4/6] 🗣️ Kullanıcı Adı, Uyandırma Kelimesi ve Konuşma Tarzı{RESET}")
     uname_raw = _ask(
         f"  {ORANGE}Adın / Kullanıcı ismin (sohbet satırında görünür, boş bırakırsan isim yazmaz){RESET}",
         s.user_name,
@@ -187,12 +221,12 @@ def cmd_setup(args) -> int:
     )
     s.custom_prompt = custom_p.strip()
 
-    # --- 4) Konuşmak İçin Anahtar Tuş (Hotkey) ---
-    print(f"\n  {BOLD}[4/5] ⌨️ Konuşma Anahtar Tuşu (İsteğe Bağlı){RESET}")
+    # --- 5) Konuşmak İçin Anahtar Tuş (Hotkey) ---
+    print(f"\n  {BOLD}[5/6] ⌨️ Konuşma Anahtar Tuşu (İsteğe Bağlı){RESET}")
     tui.prompt_hotkey_setup(s)
 
-    # --- 5) Pencere Görünümü & Sohbet Geçmişi ---
-    print(f"  {BOLD}[5/5] 📌 Pencere Görünümü & Sohbet Geçmişi{RESET}")
+    # --- 6) Pencere Görünümü & Sohbet Geçmişi ---
+    print(f"  {BOLD}[6/6] 📌 Pencere Görünümü & Sohbet Geçmişi{RESET}")
     top_default = "E" if s.always_on_top else "h"
     top_ans = _ask(f"  {ORANGE}Metro Assistant kutusu ekranda her zaman üstte dursun mu? (E/h){RESET}", top_default)
     s.always_on_top = not top_ans.lower().startswith(("h", "n"))
@@ -446,6 +480,19 @@ def cmd_service(args) -> int:
     return rc
 
 
+def cmd_uninstall(args) -> int:
+    sh_path = ROOT / "uninstall.sh"
+    if not sh_path.exists():
+        print(f"Hata: {sh_path} bulunamadı.")
+        return 1
+    cmd = ["bash", str(sh_path)]
+    if args.purge:
+        cmd.append("--purge")
+    if args.yes:
+        cmd.append("-y")
+    return subprocess.run(cmd).returncode
+
+
 # ---------------------------------------------------------------- durum / doktor
 def cmd_status(args) -> int:
     s = load()
@@ -598,6 +645,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     doc = sub.add_parser("doctor", help="kurulumu kontrol et")
     doc.set_defaults(func=cmd_doctor)
+
+    un = sub.add_parser("uninstall", help="Metro Assistant'ı ve sistem entegrasyonlarını kaldır")
+    un.add_argument("-y", "--yes", action="store_true", help="onay istemeden kaldır")
+    un.add_argument("--purge", action="store_true", help="tüm ayar, hafıza, model ve ortamları tamamen sil")
+    un.set_defaults(func=cmd_uninstall)
 
     return p
 

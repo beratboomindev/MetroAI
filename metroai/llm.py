@@ -284,10 +284,19 @@ class LLMChain:
         sid = str(sess.get("session_id") or "").strip()
         turns = int(sess.get("turns") or 0)
         total_chars = int(sess.get("chars") or 0)
+        sess_model = str(sess.get("model") or "").strip()
 
-        # Bağlam (context) çok şiştiyse eski oturumu arka planda sil ve taze oturuma geç
-        if sid and (turns >= MAX_OPENCODE_TURNS or total_chars >= MAX_OPENCODE_CHARS):
-            log_.info("OpenCode bağlamı doldu (%d tur, %d krk) -> taze oturum açılıyor", turns, total_chars)
+        # Model değiştiyse veya bağlam (context) çok şiştiyse eski oturumu arka planda sil ve taze oturuma geç
+        need_reset = False
+        if sid:
+            if sess_model and sess_model != full_model:
+                log_.info("OpenCode model değişti (%s -> %s) -> taze oturum açılıyor", sess_model, full_model)
+                need_reset = True
+            elif turns >= MAX_OPENCODE_TURNS or total_chars >= MAX_OPENCODE_CHARS:
+                log_.info("OpenCode bağlamı doldu (%d tur, %d krk) -> taze oturum açılıyor", turns, total_chars)
+                need_reset = True
+
+        if need_reset and sid:
             try:
                 subprocess.Popen(
                     [oc, "session", "delete", sid],
@@ -381,6 +390,7 @@ class LLMChain:
                     OPENCODE_SESSION_FILE,
                     {
                         "session_id": new_sid,
+                        "model": full_model,
                         "turns": turns + 1,
                         "chars": total_chars + len(prompt) + len(out),
                         "updated_at": time.time(),

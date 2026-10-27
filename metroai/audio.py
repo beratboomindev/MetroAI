@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import subprocess
+import threading
 import time
 import wave
 from pathlib import Path
@@ -120,7 +121,8 @@ class Mic:
         threshold = min(460.0, max(125.0, noise_floor * noise_multiplier))
         pre_roll: list[np.ndarray] = []
         pre_roll_max = int(0.45 * 1000 / FRAME_MS)
-        silence_frames_needed = int(silence_sec * 1000 / FRAME_MS)
+        silence_sec = min(silence_sec, 0.65)
+        silence_frames_needed = max(12, int(silence_sec * 1000 / FRAME_MS))
         max_frames = int(max_sec * 1000 / FRAME_MS)
         start_frames_needed = 2
 
@@ -129,6 +131,7 @@ class Mic:
         silent = 0
         speaking = False
         started_at = time.monotonic()
+        peak_level = threshold
 
         while len(collected) < max_frames:
             if watcher.is_esc_pressed():
@@ -147,6 +150,7 @@ class Mic:
                     voiced += 1
                     if voiced >= start_frames_needed:
                         speaking = True
+                        peak_level = max(peak_level, level)
                         collected.extend(pre_roll)
                         pre_roll.clear()
                 else:
@@ -156,7 +160,12 @@ class Mic:
                 continue
 
             collected.append(frame)
-            if level > threshold:
+            if level > peak_level:
+                peak_level = level
+
+            # Konuşma zirvesinden arka plan seviyesine düşüşü dinamik olarak algıla
+            dynamic_silence_cut = max(threshold, peak_level * 0.38)
+            if level > dynamic_silence_cut:
                 silent = 0
             else:
                 silent += 1
@@ -214,6 +223,33 @@ def cancel_chime(samplerate: int = 16000) -> None:
         pass
 
 
+_CURRENT_PLAYER: subprocess.Popen | None = None
+_PLAYER_LOCK = threading.Lock()
+
+
+def register_player(proc: subprocess.Popen | None) -> None:
+    global _CURRENT_PLAYER
+    with _PLAYER_LOCK:
+        _CURRENT_PLAYER = proc
+
+
+def stop_playback() -> None:
+    """Aktif ses oynatımını (mpv/ffplay) anında keser (Barge-in / ESC)."""
+    global _CURRENT_PLAYER
+    with _PLAYER_LOCK:
+        if _CURRENT_PLAYER is not None:
+            try:
+                _CURRENT_PLAYER.terminate()
+                _CURRENT_PLAYER.kill()
+            except Exception:
+                pass
+            _CURRENT_PLAYER = None
+    try:
+        subprocess.run(["pkill", "-f", "mpv.*--really-quiet"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 def play_file(path: Path) -> bool:
     """mpv ile çalar; mpv yoksa ffplay dener."""
     for cmd in (
@@ -221,9 +257,14 @@ def play_file(path: Path) -> bool:
         ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", str(path)],
     ):
         try:
-            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if res.returncode == 0:
+            p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            register_player(p)
+            rc = p.wait()
+            register_player(None)
+            if rc == 0:
                 return True
         except FileNotFoundError:
             continue
+        except Exception:
+            register_player(None)
     return False

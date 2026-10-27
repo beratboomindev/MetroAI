@@ -118,5 +118,8 @@ class Stt:
         if r.status_code != 200:
             raise RuntimeError(f"HTTP {r.status_code}: {r.text[:160]}")
         data = r.json()
-        parts = data["candidates"][0]["content"]["parts"]
+        cands = data.get("candidates", [])
+        if not cands:
+            return ""
+        parts = cands[0].get("content", {}).get("parts", [])
         return "".join(part.get("text", "") for part in parts).strip()

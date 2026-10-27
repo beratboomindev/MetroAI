@@ -281,13 +281,17 @@ def play_spotify(args: dict, ctx: Ctx) -> str:
     if _spotify_dbus_open(uri):
         return f"Spotify'da {title} çalınıyor."
 
-    # Spotify kapalıysa önce başlat, DBus'a gelmesini bekle ve çal
+    # Spotify kapalıysa önce başlat, arka planda DBus hazır olunca çal
     if shutil.which("spotify"):
         _spawn(["spotify", f"--uri={uri}"])
-        for _ in range(16):
-            time.sleep(0.5)
-            if _spotify_dbus_open(uri):
-                return f"Spotify açıldı, {title} çalınıyor."
+
+        def _wait_and_play():
+            for _ in range(16):
+                time.sleep(0.5)
+                if _spotify_dbus_open(uri):
+                    break
+
+        threading.Thread(target=_wait_and_play, daemon=True).start()
         return f"Spotify açılıyor ve {title} başlatılıyor."
 
     # Masaüstü uygulaması yoksa web üzerinden aç
@@ -313,6 +317,39 @@ def play_youtube(args: dict, ctx: Ctx) -> str:
 
     _spawn(["xdg-open", "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q)])
     return f"YouTube'da {q} açıldı."
+
+
+def is_media_playing() -> bool:
+    """Sistemde şu an çalan bir müzik/video (Spotify, YouTube vb.) var mı?"""
+    if not shutil.which("playerctl"):
+        return False
+    try:
+        r = subprocess.run(["playerctl", "status"], capture_output=True, text=True, timeout=2)
+        return "playing" in (r.stdout or "").lower()
+    except Exception:
+        return False
+
+
+def pause_media() -> bool:
+    """Asistan dinlerken hoparlörden gelen yankıyı kesmek için medyayı duraklatır."""
+    if not shutil.which("playerctl"):
+        return False
+    try:
+        r = subprocess.run(["playerctl", "pause"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def resume_media() -> bool:
+    """Medyayı kaldığı yerden devam ettirir."""
+    if not shutil.which("playerctl"):
+        return False
+    try:
+        r = subprocess.run(["playerctl", "play"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 @tool("volume", "Ses seviyesini ayarlar", {"action": "up|down|mute|set", "value": "set için 0-100"})
@@ -609,14 +646,112 @@ def shell(args: dict, ctx: Ctx) -> str:
     if not ctx.confirm("Şu komutu çalıştırayım mı?", detail=cmd):
         return "Komutu iptal ettim."
     rc, out = _run(["bash", "-lc", cmd], timeout=60)
-    out = out.strip().replace("\n", " ")
-    if len(out) > 240:
-        out = out[:240] + "…"
+    out = out.strip()
     if rc == 0:
-        if not out or out.startswith("/"):
+        if not out:
             return "Tamam, komutu çalıştırdım."
+        if len(out) > 3000:
+            lines = out.splitlines()
+            if len(lines) > 40:
+                out = "\n".join(lines[:35]) + f"\n… ({len(lines) - 35} satır daha var)"
+            else:
+                out = out[:3000] + "…"
         return out
-    return f"Komut hata verdi: {out[:180]}"
+    return f"Komut hata verdi: {out[:300]}"
+
+
+def _take_screenshot_to_file() -> Path | None:
+    cache_dir = STATE_DIR / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    shot_path = cache_dir / "screen_inspect.png"
+    for cmd in (
+        ["spectacle", "-b", "-n", "-f", "-o", str(shot_path)],
+        ["grim", str(shot_path)],
+        ["import", "-window", "root", str(shot_path)],
+    ):
+        if shutil.which(cmd[0]):
+            rc, _ = _run(cmd, timeout=10)
+            if rc == 0 and shot_path.exists() and shot_path.stat().st_size > 1000:
+                return shot_path
+    return None
+
+
+@tool(
+    "analyze_screen",
+    "Mevcut ekrandaki görüntüyü inceler, hata mesajlarını, açık pencereleri veya kodları analiz edip açıklar",
+    {"question": "ekranda neye bakılacağı veya soru"},
+)
+def analyze_screen(args: dict, ctx: Ctx) -> str:
+    q = str(args.get("question") or args.get("query") or args.get("prompt") or "").strip()
+    if not q:
+        q = "Ekrandaki içeriği, açık olan pencereleri veya hata mesajlarını incele."
+
+    shot = _take_screenshot_to_file()
+    if not shot:
+        return "Ekran görüntüsü alınamadı (spectacle veya grim bulunamadı)."
+
+    # 1) Gemini Multimodal API anahtarı varsa görseli doğrudan LLM'e gönder
+    import base64
+    import requests
+    from .settings import load
+    s = load()
+    gemini_key = ""
+    for p in s.providers:
+        if p.id == "gemini" and p.key():
+            gemini_key = p.key()
+            break
+    if not gemini_key:
+        gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+
+    if gemini_key:
+        try:
+            b64_data = base64.b64encode(shot.read_bytes()).decode("utf-8")
+            body = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": (
+                                    f"Sen kullanıcının Linux (KDE Plasma) masaüstü asistanısın. "
+                                    f"Kullanıcı ekranına bakarak şu soruyu soruyor: {q}\n"
+                                    f"Lütfen ekrandaki ilgili pencereleri, kodları veya hata mesajlarını inceleyip doğrudan, Türkçe ve net bir yanıt ver."
+                                )
+                            },
+                            {
+                                "inline_data": {
+                                    "mime_type": "image/png",
+                                    "data": b64_data,
+                                }
+                            },
+                        ]
+                    }
+                ],
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600},
+            }
+            r = requests.post(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                params={"key": gemini_key},
+                json=body,
+                timeout=25,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                parts = data["candidates"][0]["content"]["parts"]
+                txt = "".join(part.get("text", "") for part in parts).strip()
+                if txt:
+                    return txt
+        except Exception as e:
+            log_.debug("gemini vision hatası: %s", e)
+
+    # 2) Yedek: Yerel Tesseract OCR ile ekrandaki metni tara
+    if shutil.which("tesseract"):
+        rc, ocr_txt = _run(["tesseract", str(shot), "stdout", "-l", "tur+eng"], timeout=12)
+        if rc == 0 and ocr_txt.strip():
+            lines = [l.strip() for l in ocr_txt.splitlines() if l.strip()]
+            preview = "\n".join(lines[:20])
+            return f"Ekrandan okunan metin:\n{preview}"
+
+    return "Ekran görüntüsü alındı ancak analiz edebilecek Gemini API anahtarı veya tesseract OCR aracı bulunamadı."
 
 
 @tool(

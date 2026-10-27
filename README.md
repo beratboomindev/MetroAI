@@ -43,6 +43,28 @@ Zaten klonladıysan:
 
 ---
 
+## 🗑️ Sistemden Kaldırma (Uninstall)
+
+Metro Assistant'ı ve tüm arka plan servislerini, kısayollarını veya tüm verilerini kaldırmak için:
+
+```bash
+# Otomatik tek komutla kaldırma
+curl -fsSL https://raw.githubusercontent.com/beratboomindev/MetroAI/main/uninstall.sh | bash
+
+# Veya yerel klasörden:
+./uninstall.sh
+
+# Tüm model, sanal ortam ve ayarları da tamamen silmek (purge) için:
+./uninstall.sh --purge
+```
+
+CLI üzerinden de kaldırabilirsin:
+```bash
+metro uninstall
+```
+
+---
+
 ## 🖥️ Konsol Önizlemesi
 
 ```text
@@ -131,6 +153,7 @@ metro voices             # Ses profillerini listele ve test et
 metro status             # Servis ve LLM model zinciri durumunu göster
 metro doctor             # Mikrofon, model, TTS ve paket sağlığını kontrol et
 metro service restart    # Arka plan ses servisini yeniden başlat
+metro uninstall          # Servis, masaüstü kısayolu ve entegrasyonları kaldır
 ```
 
 ---
@@ -141,6 +164,7 @@ metro service restart    # Arka plan ses servisini yeniden başlat
 MetroAI/
 ├── metro                # Ana çalıştırılabilir CLI giriş noktası
 ├── install.sh           # Tek komutla evrensel kurulum betiği
+├── uninstall.sh         # Sistem entegrasyonlarını ve verileri temizleyen kaldırma betiği
 ├── config.example.toml  # Örnek yapılandırma dosyası
 ├── LICENSE              # MIT Lisansı
 ├── assets/

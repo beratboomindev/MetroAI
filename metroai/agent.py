@@ -17,19 +17,35 @@ def _fold(s: str) -> str:
     s = s.lower().strip()
     for a, b in (("ı", "i"), ("ş", "s"), ("ğ", "g"), ("ü", "u"), ("ö", "o"), ("ç", "c"), ("â", "a")):
         s = s.replace(a, b)
-    return re.sub(r"\s+", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    # Yerel Vosk modelinin Türkçe konuşmadaki yaygın ses/fonetik bozulmalarını düzelt
+    s = re.sub(r"\b(sportif\s+ay(?:dan)?|sportif|spor\s+fifa|sporte\s+fay|sportif\s+ay)\b", "spotify", s)
+    s = re.sub(r"\b(yutub|yutup|yutuptan|yutupdan)\b", "youtube", s)
+    s = re.sub(r"\b(sarki\s+dur|sarkiyi\s+dur|sakiyi\s+durdur|sarkiyi\s+dogur)\b", "sarkiyi durdur", s)
+    return s
 
 
-SYSTEM_PROMPT = """Sen {name}'sun. Kullanıcının CachyOS (Arch Linux, KDE Plasma, Wayland) bilgisayarında çalışan sesli yapay zeka asistanısın. Bugün {date}.
-
-KURALLAR:
+VOICE_RULES = """KURALLAR (SESLİ DİNLİYOR VE CEVAPLIYORSUN):
 - Yanıtların konuşma dilinde, kısa ve doğal Türkçe olsun. En fazla 2 cümle.
 - Yanıtın sesli okunacak: markdown, liste, emoji, kod bloğu, bağlantı KULLANMA.
 - Gereksiz giriş cümlesi kurma, doğrudan cevap ver.
 - Bilmediğin bir şeyi uydurma; bilmiyorsan söyle.
 - Kullanıcı bilgisayarda bir işlem yapmanı isterse, düz metin yerine SADECE şu JSON'u döndür:
   {{"tool": "arac_adi", "args": {{...}}}}
-  JSON dışında tek karakter bile yazma.
+  JSON dışında tek karakter bile yazma."""
+
+TEXT_RULES = """KURALLAR (YAZILI TERMİNAL / KONSOL MODUNDASIN):
+- Yanıtların profesyonel, doğrudan ve akıcı Türkçe olsun.
+- Terminal ekranındasın: kod blokları (```dil), listeler, markdown ve açıklayıcı teknik detaylar KULLANABİLİRSİN.
+- Kod yazarken veya komut önerirken doğru, eksiksiz ve temiz formatta yaz.
+- Gereksiz laf kalabalığı yapma, doğrudan soruya cevap ver.
+- Kullanıcı bilgisayarda bir işlem yapmanı isterse, düz metin yerine SADECE şu JSON'u döndür:
+  {{"tool": "arac_adi", "args": {{...}}}}
+  JSON dışında tek karakter bile yazma."""
+
+SYSTEM_TEMPLATE = """Sen {name}'sun. Kullanıcının CachyOS (Arch Linux, KDE Plasma, Wayland) bilgisayarında çalışan yapay zeka asistanısın. Bugün {date}.
+
+{rules}
 
 ARAÇLAR:
 {tools}
@@ -37,6 +53,7 @@ ARAÇLAR:
 Not:
 - "Spotify'dan/Spotify'da şu şarkıyı çal" gibi isteklerde play_spotify kullan.
 - "YouTube'dan çal" veya genel video isteklerinde play_youtube, "araştır/ara" isteklerinde web_search kullan.
+- "Ekranımda ne var", "ekrandaki hatayı açıkla", "bu pencereyi/kodu incele" gibi isteklerde analyze_screen kullan.
 - Sisteme tam erişimin var: diğer araçların kapsamadığı her türlü dosya, klasör, paket, pencere veya sistem işleminde shell aracını kullan.
 """
 
@@ -49,7 +66,7 @@ class Agent:
         self.history: deque[tuple[str, str]] = deque(maxlen=max(2, settings.history_turns * 2))
 
     # ---------- dış arayüz ----------
-    def handle(self, text: str) -> str:
+    def handle(self, text: str, is_voice: bool = False) -> str:
         text = text.strip()
         if not text:
             return "Seni duyamadım."
@@ -68,7 +85,7 @@ class Agent:
             self.history.clear()
             self.history.extend(recent)
 
-        messages = [{"role": "system", "content": self._system(query=text)}]
+        messages = [{"role": "system", "content": self._system(query=text, is_voice=is_voice)}]
         for u, a in self.history:
             messages.append({"role": "user", "content": u})
             messages.append({"role": "assistant", "content": a})
@@ -80,15 +97,17 @@ class Agent:
             log_.error("model yok: %s", e)
             return self._offline(text)
 
-        out = self._handle_json(reply.text)
+        out = self._handle_json(reply.text, is_voice=is_voice, original_query=text)
         self.history.append((text, out))
         return out
 
     # ---------- LLM çıktısı ----------
-    def _system(self, query: str = "") -> str:
-        base = SYSTEM_PROMPT.format(
+    def _system(self, query: str = "", is_voice: bool = False) -> str:
+        rules = VOICE_RULES if is_voice else TEXT_RULES
+        base = SYSTEM_TEMPLATE.format(
             name=self.s.name,
             date=datetime.now().strftime("%d.%m.%Y %H:%M"),
+            rules=rules,
             tools=tools.spec_text(),
         )
         mem_ctx = memory.relevant_context(query, max_chars=200)
@@ -98,7 +117,7 @@ class Agent:
             base += f"\nKULLANICI ÖZEL TALİMATI:\n{self.s.custom_prompt}\n"
         return base
 
-    def _handle_json(self, raw: str) -> str:
+    def _handle_json(self, raw: str, is_voice: bool = False, original_query: str = "") -> str:
         payload = extract_json(raw)
         if not isinstance(payload, dict):
             stripped = raw.strip()
@@ -119,6 +138,8 @@ class Agent:
                 "spotify": "play_spotify",
                 "youtube": "play_youtube",
                 "search": "web_search",
+                "screen": "analyze_screen",
+                "ocr": "analyze_screen",
                 "exit": "close_metro",
                 "quit": "close_metro",
                 "close": "close_metro",
@@ -135,7 +156,34 @@ class Agent:
             if t.dangerous and self.s.confirm_dangerous and name not in ("shell", "power"):
                 if not self.ctx.confirm(f"{name} işlemini onaylıyor musun?"):
                     return "İptal ettim."
-            return t.fn(args, self.ctx)
+            tool_res = t.fn(args, self.ctx)
+
+            # ReAct Sentezi: Bilgi sorgulayan araçlarda kullanıcının sorusuna doğrudan doğal cevap ver
+            info_tools = ("weather", "system_info", "note_list", "clipboard_get", "analyze_screen")
+            if name in info_tools and original_query and len(tool_res) > 3:
+                try:
+                    synth_messages = [
+                        {"role": "system", "content": self._system(query=original_query, is_voice=is_voice)},
+                        {"role": "user", "content": original_query},
+                        {"role": "assistant", "content": raw},
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Araç çalıştırma sonucu: {tool_res}\n"
+                                f"Bu sonuca dayanarak kullanıcının sorusuna ({original_query}) doğrudan, doğal ve net bir cevap ver."
+                            ),
+                        },
+                    ]
+                    synth_reply = self.chain.chat(synth_messages, max_tokens=250)
+                    if synth_reply and synth_reply.text.strip():
+                        return synth_reply.text.strip()
+                except Exception as ex:
+                    log_.debug("ReAct sentez hatası: %s", ex)
+
+            return tool_res
+        except Exception as e:
+            log_.exception("araç hatası: %s", name)
+            return f"İşlem sırasında hata oldu: {e}"
         except Exception as e:
             log_.exception("araç hatası: %s", name)
             return f"İşlem sırasında hata oldu: {e}"
@@ -159,6 +207,45 @@ class Agent:
             return tools.system_info({"what": "battery"}, self.ctx)
         if has("api bagla", "provider bagla", "api cek", "saglayici bagla", "modelleri cek"):
             return "Provider ve API bağlama menüsünü açıyorum. Metro Assistant penceresinden seçebilir veya /api yazabilirsin."
+        if has("ekrana bak", "ekrani incele", "ekranı incele", "ekranda ne var", "ekrandaki hata"):
+            return tools.analyze_screen({"question": text}, self.ctx)
+
+        # 1) Müzik / Medya Durdurma (0ms anında yerel yürütme — LLM'e göndermeden hemen yap)
+        if (
+            has(
+                "sarkiyi durdur", "sarki durdur", "muzigi durdur", "muzik durdur",
+                "sarkiyi dur", "sarki dur", "muzigi dur", "muzik dur",
+                "durdur", "sarki dursun", "muzik dursun", "videoyu durdur",
+                "pause", "oynatmayi durdur", "kes sesi", "calma", "çalma"
+            )
+            or re.fullmatch(r"(?:hey\s+metro\s+|metro\s+)?(dur|durdur|kes|yeter|sessiz)[\s!.,]*", t)
+        ):
+            return tools.media({"action": "pause"}, self.ctx)
+
+        # 2) Müzik / Medya Oynatma ve Devam Ettirme
+        if (
+            has(
+                "sarkiyi devam", "muzigi devam", "devam et", "devam ettir", "surdur",
+                "sarkiyi ac", "muzigi ac", "muzigi baslat", "sarkiyi baslat", "calmaya devam"
+            )
+            or re.fullmatch(r"(?:hey\s+metro\s+|metro\s+)?(cal|oynat|devam|surdur)[\s!.,]*", t)
+        ):
+            return tools.media({"action": "play"}, self.ctx)
+
+        # 3) Sonraki / Önceki Şarkı
+        if has("sonraki sarki", "diger sarki", "sarkiyi gec", "bunu gec", "atla", "sonraki parca", "next", "sonraki"):
+            return tools.media({"action": "next"}, self.ctx)
+        if has("onceki sarki", "basa sar", "onceki parca", "previous", "onceki"):
+            return tools.media({"action": "previous"}, self.ctx)
+
+        # 4) Ses Seviyesi (Aç, Kıs, Kapat)
+        if has("sesi ac", "sesi yukselt", "sesi arttir", "sesi artir", "sesi biraz ac"):
+            return tools.volume({"action": "up"}, self.ctx)
+        if has("sesi kis", "sesi azalt", "sesi dusur", "sesi biraz kis"):
+            return tools.volume({"action": "down"}, self.ctx)
+        if has("sesi kapat", "sesi sustur", "sessize al", "sesi kes", "sustur", "mute"):
+            return tools.volume({"action": "mute"}, self.ctx)
+
         msp = re.match(
             r"^(?:hey\s+metro\s+)?spotify(?:da|dan|'da|'dan)?\s+(.+?)\s+(?:sarkisini\s+|parcasini\s+)?(?:cal|ac|baslat|oynat)[\s!.,]*$",
             t,
