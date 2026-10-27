@@ -56,6 +56,7 @@ class Settings:
     max_reply_chars: int = 500
     history_turns: int = 6
     providers: list[Provider] = field(default_factory=list)
+    active_stt: str = "whisper-base"
     stt_order: list[str] = field(default_factory=lambda: ["groq", "gemini", "vosk"])
     stt_model: str = "whisper-large-v3"
     vosk_model: str = "models/vosk-model-small-tr-0.3"
@@ -151,6 +152,7 @@ def load() -> Settings:
         s.aliases = {str(k).strip(): str(v).strip() for k, v in raw_aliases.items() if str(k).strip() and str(v).strip()}
 
     stt = data.get("stt", {})
+    s.active_stt = stt.get("active", stt.get("active_stt", s.active_stt))
     s.stt_order = stt.get("provider_order", s.stt_order)
     s.stt_model = stt.get("model", s.stt_model)
     s.vosk_model = stt.get("vosk_model", s.vosk_model)
@@ -230,6 +232,7 @@ def render_config(s: Settings) -> str:
         lines.append("")
 
     lines.append("[stt]")
+    lines.append(f"active = {_toml_str(s.active_stt)}")
     lines.append(f"provider_order = {_toml_list(s.stt_order)}")
     lines.append(f"model = {_toml_str(s.stt_model)}")
     lines.append(f"vosk_model = {_toml_str(s.vosk_model)}\n")

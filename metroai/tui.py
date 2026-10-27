@@ -717,8 +717,9 @@ class MetroAssistantTUI:
         )
         line2 = (
             f"{GRAY}Komut:{RESET} {WHITE}/model{RESET} {GRAY}•{RESET} "
-            f"{WHITE}/yeni{RESET} {GRAY}•{RESET} {WHITE}/gecmis{RESET} {GRAY}•{RESET} "
-            f"{WHITE}/hafiza{RESET} {GRAY}•{RESET} {WHITE}/ayarlar{RESET} {GRAY}•{RESET} {WHITE}/help{RESET}"
+            f"{WHITE}/stt{RESET} {GRAY}•{RESET} {WHITE}/yeni{RESET} {GRAY}•{RESET} "
+            f"{WHITE}/gecmis{RESET} {GRAY}•{RESET} {WHITE}/hafiza{RESET} {GRAY}•{RESET} "
+            f"{WHITE}/ayarlar{RESET} {GRAY}•{RESET} {WHITE}/help{RESET}"
         )
 
         return [
@@ -1032,23 +1033,27 @@ class MetroAssistantTUI:
             aliases_disp = ", ".join(self.s.aliases.keys()) if self.s.aliases else "Yok"
 
             user_disp = self.s.user_name.strip() if self.s.user_name.strip() else "Boş (Yalnızca ❯)"
+            from . import stt
+            stt_info = stt.STT_MODELS.get(getattr(self.s, "active_stt", "whisper-base"), {})
+            stt_disp = stt_info.get("name", getattr(self.s, "active_stt", "whisper-base"))
 
             print(f"\n  {BOLD}⚙ Metro Assistant — Özelleştirme ve Ayarlar Merkezi:{RESET}")
             print(f"    {CYAN}1){RESET} Aktif LLM Modeli       : {GREEN}{self._active_model_display()}{RESET}")
-            print(f"    {CYAN}2){RESET} Ses Profili (TTS)      : {WHITE}{self.s.voice}{RESET}")
-            print(f"    {CYAN}3){RESET} Uyandırma Kelimeleri   : {WHITE}{', '.join(self.s.wake_words)}{RESET}")
-            print(f"    {CYAN}4){RESET} Konuşma Kısayol Tuşu   : {CYAN}{hotkey_disp}{RESET}")
-            print(f"    {CYAN}5){RESET} Pencere Her Zaman Üstte: {GREEN if self.s.always_on_top else GRAY}{'Açık' if self.s.always_on_top else 'Kapalı'}{RESET}")
-            print(f"    {CYAN}6){RESET} Özel Kişilik / Talimat : {WHITE}{prompt_disp}{RESET}")
-            print(f"    {CYAN}7){RESET} Özel Slash Komutları   : {WHITE}{aliases_disp}{RESET}")
-            print(f"    {CYAN}8){RESET} Uyandırma Çan Sesi     : {GREEN if self.s.chime else GRAY}{'Açık' if self.s.chime else 'Kapalı'}{RESET}")
-            print(f"    {CYAN}9){RESET} Sistem Komutu Onayı    : {GREEN if self.s.confirm_dangerous else YELLOW}{'Açık (Güvenli)' if self.s.confirm_dangerous else 'Kapalı'}{RESET}")
-            print(f"   {CYAN}10){RESET} Sohbet Geçmişi Kaydı   : {GREEN if self.s.save_history else GRAY}{'Açık (/gecmis)' if self.s.save_history else 'Kapalı (Gizli Mod)'}{RESET}")
-            print(f"   {CYAN}11){RESET} Kullanıcı İsmi (/isim) : {WHITE}{user_disp}{RESET}")
+            print(f"    {CYAN}2){RESET} Ses Dinleme (STT)      : {GREEN}{stt_disp}{RESET}")
+            print(f"    {CYAN}3){RESET} Ses Profili (TTS)      : {WHITE}{self.s.voice}{RESET}")
+            print(f"    {CYAN}4){RESET} Uyandırma Kelimeleri   : {WHITE}{', '.join(self.s.wake_words)}{RESET}")
+            print(f"    {CYAN}5){RESET} Konuşma Kısayol Tuşu   : {CYAN}{hotkey_disp}{RESET}")
+            print(f"    {CYAN}6){RESET} Pencere Her Zaman Üstte: {GREEN if self.s.always_on_top else GRAY}{'Açık' if self.s.always_on_top else 'Kapalı'}{RESET}")
+            print(f"    {CYAN}7){RESET} Özel Kişilik / Talimat : {WHITE}{prompt_disp}{RESET}")
+            print(f"    {CYAN}8){RESET} Özel Slash Komutları   : {WHITE}{aliases_disp}{RESET}")
+            print(f"    {CYAN}9){RESET} Uyandırma Çan Sesi     : {GREEN if self.s.chime else GRAY}{'Açık' if self.s.chime else 'Kapalı'}{RESET}")
+            print(f"   {CYAN}10){RESET} Sistem Komutu Onayı    : {GREEN if self.s.confirm_dangerous else YELLOW}{'Açık (Güvenli)' if self.s.confirm_dangerous else 'Kapalı'}{RESET}")
+            print(f"   {CYAN}11){RESET} Sohbet Geçmişi Kaydı   : {GREEN if self.s.save_history else GRAY}{'Açık (/gecmis)' if self.s.save_history else 'Kapalı (Gizli Mod)'}{RESET}")
+            print(f"   {CYAN}12){RESET} Kullanıcı İsmi (/isim) : {WHITE}{user_disp}{RESET}")
             print(f"    {CYAN}0){RESET} Kaydet ve Çık\n")
 
             try:
-                c = input(_rl_prompt(f"  {ORANGE}{BOLD}Değiştirmek istediğin ayar (1-11 / 0) [0]: {RESET}")).strip()
+                c = input(_rl_prompt(f"  {ORANGE}{BOLD}Değiştirmek istediğin ayar (1-12 / 0) [0]: {RESET}")).strip()
             except (EOFError, KeyboardInterrupt):
                 print()
                 break
@@ -1059,8 +1064,11 @@ class MetroAssistantTUI:
             elif c == "1":
                 self.run_model_manager()
             elif c == "2":
-                self._handle_slash("/voice")
+                stt.select_stt_model_interactive(self.s)
+                self.s = load()
             elif c == "3":
+                self._handle_slash("/voice")
+            elif c == "4":
                 try:
                     w = input(f"  {CYAN}Uyandırma kelimeleri (virgülle ayır) [{', '.join(self.s.wake_words)}]: {RESET}").strip()
                     if w:
@@ -1069,11 +1077,11 @@ class MetroAssistantTUI:
                         print(f"  {GREEN}✓ Uyandırma kelimeleri güncellendi (servisi yeniden başlatmak için: /sh systemctl --user restart metro.service){RESET}")
                 except (EOFError, KeyboardInterrupt):
                     pass
-            elif c == "4":
-                prompt_hotkey_setup(self.s)
             elif c == "5":
-                self._handle_slash("/top")
+                prompt_hotkey_setup(self.s)
             elif c == "6":
+                self._handle_slash("/top")
+            elif c == "7":
                 try:
                     p = input(f"  {CYAN}Metro nasıl davransın? (Boş = sıfırla): {RESET}").strip()
                     self.s.custom_prompt = p
@@ -1082,21 +1090,21 @@ class MetroAssistantTUI:
                     print(f"  {GREEN}✓ Özel talimat güncellendi.{RESET}")
                 except (EOFError, KeyboardInterrupt):
                     pass
-            elif c == "7":
-                self._manage_aliases("")
             elif c == "8":
+                self._manage_aliases("")
+            elif c == "9":
                 self.s.chime = not self.s.chime
                 save(self.s)
                 print(f"  {GREEN}✓ Çan sesi {'açıldı' if self.s.chime else 'kapatıldı'}.{RESET}")
-            elif c == "9":
+            elif c == "10":
                 self.s.confirm_dangerous = not self.s.confirm_dangerous
                 save(self.s)
                 print(f"  {GREEN}✓ Tehlikeli komut onayı {'açıldı' if self.s.confirm_dangerous else 'kapatıldı'}.{RESET}")
-            elif c == "10":
+            elif c == "11":
                 self.s.save_history = not self.s.save_history
                 save(self.s)
                 print(f"  {GREEN}✓ Sohbet geçmişi kaydı {'açıldı' if self.s.save_history else 'kapatıldı'}.{RESET}")
-            elif c == "11":
+            elif c == "12":
                 try:
                     u_in = input(f"  {CYAN}Kullanıcı ismin (boş bırakırsan isim yazmaz): {RESET}").strip()
                     if u_in.lower() in ("yok", "boş", "bos", "-", "sil", "none"):
@@ -1482,6 +1490,7 @@ class MetroAssistantTUI:
         if cmd in ("/help", "/h", "/yardim", "/yardım"):
             print(f"\n  {BOLD}Metro Assistant — Komut ve Özelleştirme Rehberi:{RESET}")
             print(f"  {CYAN}/model{RESET} {GRAY}(veya /m){RESET}      Aktif modeli elle seç, değiştir, yeni model ekle veya sıfırla")
+            print(f"  {CYAN}/stt{RESET} {GRAY}(veya /micmodel){RESET}  Ses dinleme (STT) modelini seç (faster-whisper, Groq, Vosk)")
             print(f"  {CYAN}/model <no|ad>{RESET}      Belirtilen modele anında geç (örn: {WHITE}/model 2{RESET}, {WHITE}/model auto{RESET})")
             print(f"  {CYAN}/api{RESET} {GRAY}(veya /p){RESET}        Sağlayıcı (Provider) bağla ve API anahtarı gir")
             print(f"  {CYAN}/pull{RESET}               Bağlı sağlayıcılardan güncel modelleri API'den çek")
@@ -1507,6 +1516,13 @@ class MetroAssistantTUI:
 
         if cmd in ("/model", "/models", "/m"):
             self.run_model_manager(arg)
+            return True
+
+        if cmd in ("/stt", "/micmodel", "/sesmodel"):
+            from . import stt
+            stt.select_stt_model_interactive(self.s)
+            self.s = load()
+            self.render_header(clear_screen=False)
             return True
 
         if cmd in ("/status", "/durum"):

@@ -65,26 +65,36 @@ def _agc_frame(frame: np.ndarray, target_rms: float = 2200.0) -> bytes:
 
 class WakeWord:
     def __init__(self, model_path: Path, keywords: list[str], samplerate: int = 16000):
-        if vosk is None:
-            raise RuntimeError("vosk kurulu değil: ./venv/bin/pip install vosk")
-        if not Path(model_path).exists():
-            raise RuntimeError(
-                f"Vosk modeli bulunamadı: {model_path}\n"
-                "İndirmek için: ./install.sh"
-            )
-        self.model = vosk.Model(str(model_path))
+        self.active = True
         self.samplerate = samplerate
         self.keywords = [_fold(k) for k in keywords if _fold(k)] or ["metro"]
-        self._grammar_json = self._build_grammar(self.keywords)
-        self.rec_grammar = self._new_grammar_rec()
-        self.rec_free = self._new_free_rec()
         self.last_trigger = 0.0
         self.last_reset = time.monotonic()
-        log_.info(
-            "Uyandırma modeli yüklendi (%s) — kelimeler: %s",
-            Path(model_path).name,
-            ", ".join(keywords),
-        )
+        self.rec_grammar = None
+        self.rec_free = None
+        self.model = None
+
+        p = Path(model_path)
+        if not p.exists():
+            from .stt import download_vosk
+            log_.info("Vosk uyandırma modeli eksik, indiriliyor...")
+            if not download_vosk(p.parent):
+                log_.warning("Vosk modeli indirilemedi. Sesle uyandırma pasif, kısayol tuşu aktif kalacak.")
+                self.active = False
+                return
+
+        if vosk is not None and p.exists():
+            try:
+                self.model = vosk.Model(str(p))
+                self._grammar_json = self._build_grammar(self.keywords)
+                self.rec_grammar = self._new_grammar_rec()
+                self.rec_free = self._new_free_rec()
+                log_.info("Uyandırma modeli yüklendi (%s) — kelimeler: %s", p.name, ", ".join(keywords))
+            except Exception as e:
+                log_.warning("Vosk modeli açılamadı: %s", e)
+                self.active = False
+        else:
+            self.active = False
 
     @staticmethod
     def _build_grammar(keywords: list[str]) -> str:
@@ -136,6 +146,8 @@ class WakeWord:
 
     def feed(self, frame: np.ndarray) -> bool:
         """Bir PCM çerçevesi besler; uyandırma kelimesi duyulursa True döner."""
+        if not self.active:
+            return False
         now = time.monotonic()
         # Konuşmacı i-vector adaptasyonunun tek kişiye kilitlenmemesi için 8 saniyede bir sıfırla
         if now - self.last_reset > 8.0:
@@ -194,6 +206,8 @@ class WakeWord:
 
     def transcribe(self, wav_bytes: bytes) -> str:
         """Yerel (çevrimdışı) yedek STT (WAV container başlığını güvenle soyar)."""
+        if not self.active or not self.model:
+            return ""
         pcm = wav_bytes
         if wav_bytes.startswith(b"RIFF") and len(wav_bytes) > 44:
             try:

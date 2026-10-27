@@ -66,16 +66,9 @@ echo "[4/6] Python paketleri yükleniyor..."
 venv/bin/python -m pip install --quiet --upgrade pip
 venv/bin/python -m pip install --quiet -r requirements.txt
 
-# 4) Türkçe uyandırma modeli
-echo "[5/6] Türkçe ses tanıma modeli hazırlanıyor..."
-if [[ ! -d models/vosk-model-small-tr-0.3 ]]; then
-  mkdir -p models
-  tmp="models/tr-model.zip"
-  curl -L --fail --progress-bar -o "$tmp" \
-    https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip
-  unzip -q -o "$tmp" -d models/
-  rm -f "$tmp"
-fi
+# 4) Ses Tanıma Modeli Hazırlığı
+echo "[5/6] Ses tanıma modeli yapılandırma sihirbazında seçilip indirilecek..."
+mkdir -p models
 
 # 5) Hızlı Özelleştirme Sihirbazı (Model, Ses, Uyandırma Kelimesi, Kısayol Tuşu, Her Zaman Üstte)
 chmod +x metro

@@ -23,7 +23,9 @@ max_reply_chars = 500
 history_turns = 6
 
 [stt]
-# Sırayla denenir. vosk = tamamen çevrimdışı yedek.
+# Aktif ses dinleme modeli:
+# whisper-base (önerilen yerel, ~145MB) | whisper-small (~460MB) | whisper-tiny (~75MB) | whisper-turbo (~800MB) | groq (bulut) | gemini (bulut) | vosk-small-tr
+active = "whisper-base"
 provider_order = ["groq", "gemini", "vosk"]
 model = "whisper-large-v3"
 vosk_model = "models/vosk-model-small-tr-0.3"

@@ -13,7 +13,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__, audio, keys, log, tools, tts
+from . import __version__, audio, keys, log, stt, tools, tts
 from .agent import Agent
 from .settings import (
     CACHE_DIR,
@@ -35,6 +35,17 @@ from .llm import LLMChain
 VOSK_URL = "https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"
 SERVICE = "metro.service"
 UNIT_PATH = Path.home() / ".config/systemd/user" / SERVICE
+
+# ANSI renkler
+BOLD = "\033[1m"
+GREEN = "\033[32m"
+CYAN = "\033[36m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+GRAY = "\033[90m"
+WHITE = "\033[37m"
+ORANGE = "\033[38;5;214m"
+RESET = "\033[0m"
 
 
 # ---------------------------------------------------------------- yardımcılar
@@ -138,27 +149,14 @@ def cmd_setup(args) -> int:
                     s.active_model = ""
                     _ok("Model modu: Otomatik Zincir")
 
-    # --- 2) Türkçe Ses Tanıma (Groq Whisper STT — %99 Doğruluk) ---
-    print(f"\n  {BOLD}[2/6] 🎤 Türkçe Ses Tanıma Motoru (Groq Whisper STT — Şiddetle Önerilir){RESET}")
-    print(f"  {GRAY}Metro'nun konuşmanı günlük dilde (%99 doğruluk, 200ms) kusursuz anlayabilmesi için{RESET}")
-    print(f"  {GRAY}ücretsiz Groq API anahtarı önerilir. (Yerel 40MB Vosk modeli arkada yedek kalır){RESET}")
-    print(f"  {CYAN}👉 Ücretsiz API Anahtarı: https://console.groq.com/keys{RESET}")
-    groq_p = next((p for p in s.providers if p.id == "groq"), None)
-    has_groq = bool(groq_p and groq_p.api_key)
-    prompt_groq = f"  {ORANGE}Groq API anahtarını yapıştır (Enter=mevcut korunur){RESET}" if has_groq else f"  {ORANGE}Groq API anahtarını yapıştır (Enter=atla/yerel vosk){RESET}"
-    gkey = _ask_secret(prompt_groq)
-    if gkey:
-        if groq_p:
-            groq_p.api_key = gkey
-            groq_p.enabled = True
-        save(s)
-        _ok("Groq Whisper STT bağlandı! Türkçe ses tanıma maksimum hassasiyete alındı.")
-    elif has_groq:
-        _ok("Mevcut Groq API anahtarı korundu.")
-    else:
-        _info("Atlandı — Çevrimdışı küçük Vosk modeli kullanılacak.")
+    # --- 2) Türkçe Ses Dinleme (STT) Modeli ---
+    print(f"\n  {BOLD}[2/6] 🎤 Türkçe Ses Dinleme (STT) Modeli Seçimi{RESET}")
+    print(f"  {GRAY}Metro'nun konuşmanı günlük dilde kusursuz anlayabilmesi için dilediğin modeli seç.{RESET}")
+    chosen_stt = stt.select_stt_model_interactive(s)
+    s.active_stt = chosen_stt
+    save(s)
 
-    want_extra_api = _ask(f"\n  {GRAY}Ek olarak Gemini veya OpenRouter API anahtarı girmek ister misin? (e/H){RESET}", "h")
+    want_extra_api = _ask(f"\n  {GRAY}Ek olarak Gemini veya OpenRouter LLM API anahtarı girmek ister misin? (e/H){RESET}", "h")
     if want_extra_api.lower().startswith(("e", "y")):
         print(f"    {GRAY}• Gemini     → https://aistudio.google.com/apikey   (geniş ücretsiz kota){RESET}")
         print(f"    {GRAY}• OpenRouter → https://openrouter.ai/keys           (onlarca :free model){RESET}")
@@ -238,12 +236,14 @@ def cmd_setup(args) -> int:
     s.save_history = not hist_ans.lower().startswith(("h", "n"))
     _ok(f"Sohbet geçmişi kaydı: {'Açık' if s.save_history else 'Kapalı'}")
 
-    if not vosk_path(s).exists():
-        print("\n  Türkçe ses tanıma modeli indiriliyor (~50 MB)...")
-        if _download_vosk(MODELS_DIR):
-            _ok("Model hazır: models/vosk-model-small-tr-0.3")
-        else:
-            _bad("Model indirilemedi. Daha sonra `./metro setup` ile tekrar dene.")
+    # Seçili STT modelinin indirilmiş olduğundan emin ol
+    if not stt.is_stt_model_downloaded(s.active_stt, s):
+        stt.download_stt_model(s.active_stt)
+
+    # Uyandırma kelimesi varsa arka plan Vosk modelini kontrol et
+    if s.wake_words and not vosk_path(s).exists():
+        print(f"\n  {GRAY}Arka plan sesli uyandırma motoru ('Hey Metro') için Vosk modeli hazırlanıyor...{RESET}")
+        stt.download_vosk(MODELS_DIR)
 
     save(s)
     print(f"\n  {GREEN}{BOLD}✓ Tüm ayarlar kaydedildi:{RESET} {CONFIG_PATH}")
@@ -413,6 +413,40 @@ def cmd_voices(args) -> int:
     return 0
 
 
+def cmd_stt(args) -> int:
+    s = load()
+    if getattr(args, "list", False):
+        print(f"\n  {BOLD}🎤 Mevcut Ses Dinleme (STT) Modelleri:{RESET}")
+        for mid, info in stt.STT_MODELS.items():
+            mark = f"{GREEN}●{RESET}" if mid == getattr(s, "active_stt", "") else " "
+            downloaded = stt.is_stt_model_downloaded(mid, s)
+            if mid in ("groq", "gemini"):
+                stat = f"{GREEN}[Anahtar Bağlı]{RESET}" if downloaded else f"{GRAY}[Anahtar Gerekir]{RESET}"
+            else:
+                stat = f"{GREEN}[İndirildi]{RESET}" if downloaded else f"{YELLOW}[İndirilmedi - {info['size_str']}]{RESET}"
+            badge = f"[{info['badge']}]"
+            print(f"    {mark} {BOLD}{mid:<16}{RESET} {badge:<22} {info['name']:<35} {stat}")
+            print(f"       {GRAY}└─ {info['desc']}{RESET}")
+        print()
+        return 0
+
+    if getattr(args, "set_model", None):
+        mid = args.set_model.strip()
+        if mid not in stt.STT_MODELS:
+            print(f"{RED}Geçersiz model:{RESET} {mid}")
+            print(f"Seçenekler: {', '.join(stt.STT_MODELS.keys())}")
+            return 1
+        if not stt.is_stt_model_downloaded(mid, s):
+            stt.download_stt_model(mid)
+        s.active_stt = mid
+        save(s)
+        _ok(f"Aktif ses dinleme modeli güncellendi: {stt.STT_MODELS[mid]['name']}")
+        return 0
+
+    stt.select_stt_model_interactive(s)
+    return 0
+
+
 def cmd_chat(args) -> int:
     from . import tui
 
@@ -506,6 +540,8 @@ def cmd_status(args) -> int:
     print(f"  Servis        : {active}")
     ready = [p.id for p in s.providers if p.usable()]
     print(f"  Sağlayıcılar  : {', '.join(ready) or 'yok'}")
+    stt_info = stt.STT_MODELS.get(getattr(s, "active_stt", "whisper-base"), {})
+    print(f"  Ses Dinleme   : {stt_info.get('name', s.active_stt)}")
     chain = LLMChain(s)
     rows = chain.status_rows()
     if rows:
@@ -629,6 +665,11 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--lang", default="tr")
     v.add_argument("--set", dest="set_voice", metavar="SES", help="aktif sesi değiştir ve test et (örn. metro, brian, seraphina)")
     v.set_defaults(func=cmd_voices)
+
+    st_p = sub.add_parser("stt", help="ses dinleme (STT) modellerini listele veya değiştir")
+    st_p.add_argument("-l", "--list", action="store_true", help="tüm modelleri ve indirme durumunu listele")
+    st_p.add_argument("--set", dest="set_model", metavar="MODEL", help="aktif STT modelini değiştir (örn: whisper-base, groq)")
+    st_p.set_defaults(func=cmd_stt)
 
     ch = sub.add_parser("chat", aliases=["assistant", "tui"], help="Metro Assistant etkileşimli sohbet konsolunu aç")
     ch.add_argument("-s", "--speak", action="store_true", help="yazılı yanıtları da seslendir")

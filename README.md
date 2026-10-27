@@ -109,6 +109,7 @@ Metro Assistant penceresi açıkken aşağıdaki slash komutlarıyla her şeyi a
 | Komut | Kısayol | Açıklama |
 | :--- | :--- | :--- |
 | `/model` | `/m` | Numaralı listeden **aktif modeli elle seç**, yeni model ekle (`/model ekle groq/...`), sil veya `/model auto` ile otomatik zincire dön. |
+| `/stt` | `/micmodel` | **Ses dinleme (STT) modelini seç veya indir** (`whisper-base`, `whisper-small`, `whisper-turbo`, `groq`, `vosk`). |
 | `/api` | `/p` | Sağlayıcı (Provider) bağla, API anahtarı gir veya OpenCode ücretsiz modellerini tek tuşla çek. |
 | `/hafiza` | `/mem` | Kalıcı hafızadaki kayıtları listele, yeni bilgi ekle (`/hafiza ekle ...`), sil veya temizle. |
 | `/gecmis` | `/history` | Kaydedilen eski sohbetleri listele, `/gecmis <no>` ile yükle veya `/gecmis kapat` ile geçmiş kaydını kapat. |
@@ -150,6 +151,8 @@ metro setup              # 5 adımlı özelleştirilmiş kurulum sihirbazını �
 metro ask "saat kaç"     # Tek seferlik yazılı soru sor (-s ile sesli yanıt)
 metro say "Merhaba"      # Metni aktif ses profiliyle seslendir
 metro voices             # Ses profillerini listele ve test et
+metro stt                # Ses dinleme (STT) modelini seç veya indir (faster-whisper / groq / vosk)
+metro stt -l             # Tüm STT modellerini ve indirme durumunu listele
 metro status             # Servis ve LLM model zinciri durumunu göster
 metro doctor             # Mikrofon, model, TTS ve paket sağlığını kontrol et
 metro service restart    # Arka plan ses servisini yeniden başlat
