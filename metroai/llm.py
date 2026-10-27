@@ -332,7 +332,7 @@ class LLMChain:
                 if c_text:
                     parts.append(f"{r_label}: {c_text}")
             parts.append(
-                "Not: Kendi dosya/bash araçlarını ÇALIŞTIRMA. Yalnızca yukarıdaki kurallara göre kısa düz metin veya araç JSON'u döndür."
+                "Not: Sistem ve masaüstü işlemlerinde yukarıda tanımlı araçları (JSON formatında) kullanabilirsin."
             )
             prompt = "\n\n".join(parts)
             cmd = [oc, "run", "--format", "json", "--title", "Metro Assistant", "-m", full_model, prompt]
@@ -344,10 +344,7 @@ class LLMChain:
                     if line.startswith("KULLANICI HAFIZASI:"):
                         mem_line = f"[{line}]\n"
                         break
-            prompt = (
-                f"{mem_line}{user_msg}\n"
-                "(Kendi bash/dosya aracını çalıştırma; sadece Türkçe düz metin veya {\"tool\":...} JSON döndür.)"
-            )
+            prompt = f"{mem_line}{user_msg}"
             cmd = [oc, "run", "--format", "json", "-s", sid, "-m", full_model, prompt]
 
         try:

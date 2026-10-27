@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 from collections import deque
 from datetime import datetime
@@ -25,36 +26,56 @@ def _fold(s: str) -> str:
     return s
 
 
+def _detect_os_info() -> str:
+    """Sistemin dağıtımını, masaüstü ortamını ve oturum türünü dinamik tespit eder."""
+    import os
+    distro = "Linux"
+    try:
+        os_rel = Path("/etc/os-release")
+        if os_rel.exists():
+            for line in os_rel.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if line.startswith("PRETTY_NAME="):
+                    distro = line.split("=", 1)[1].strip('"\'')
+                    break
+                elif line.startswith("NAME=") and distro == "Linux":
+                    distro = line.split("=", 1)[1].strip('"\'')
+    except Exception:
+        pass
+    de = os.environ.get("XDG_CURRENT_DESKTOP") or os.environ.get("DESKTOP_SESSION") or ""
+    session_type = os.environ.get("XDG_SESSION_TYPE") or ""
+    details = [distro]
+    if de:
+        details.append(de)
+    if session_type:
+        details.append(session_type)
+    return ", ".join(details)
+
+
 VOICE_RULES = """KURALLAR (SESLİ DİNLİYOR VE CEVAPLIYORSUN):
-- Yanıtların konuşma dilinde, kısa ve doğal Türkçe olsun. En fazla 2 cümle.
-- Yanıtın sesli okunacak: markdown, liste, emoji, kod bloğu, bağlantı KULLANMA.
-- Gereksiz giriş cümlesi kurma, doğrudan cevap ver.
-- Bilmediğin bir şeyi uydurma; bilmiyorsan söyle.
-- Kullanıcı bilgisayarda bir işlem yapmanı isterse, düz metin yerine SADECE şu JSON'u döndür:
-  {{"tool": "arac_adi", "args": {{...}}}}
-  JSON dışında tek karakter bile yazma."""
+- Kullanıcının konuştuğu dilde yanıt ver.
+- Yanıtların konuşma dilinde, doğal ve akıcı olsun. Yapay cümle sınırlarına takılmadan konuyu tam ve anlaşılır şekilde aktar.
+- Yanıtın sesli okunacak: karmaşık markdown tabloları, emoji yığınları veya kod blokları kullanma; metin konuşma diline uygun olsun.
+- Özel bir sistem veya medya işlemi gerçekleştireceksen yanıtında araç JSON'unu kullan:
+  {{"tool": "arac_adi", "args": {{...}}}}"""
 
 TEXT_RULES = """KURALLAR (YAZILI TERMİNAL / KONSOL MODUNDASIN):
-- Yanıtların profesyonel, doğrudan ve akıcı Türkçe olsun.
-- Terminal ekranındasın: kod blokları (```dil), listeler, markdown ve açıklayıcı teknik detaylar KULLANABİLİRSİN.
-- Kod yazarken veya komut önerirken doğru, eksiksiz ve temiz formatta yaz.
-- Gereksiz laf kalabalığı yapma, doğrudan soruya cevap ver.
-- Kullanıcı bilgisayarda bir işlem yapmanı isterse, düz metin yerine SADECE şu JSON'u döndür:
-  {{"tool": "arac_adi", "args": {{...}}}}
-  JSON dışında tek karakter bile yazma."""
+- Kullanıcının yazdığı dilde yanıt ver.
+- Tam yetkili bir sistem asistanısın. Yanıtların derinlemesine, profesyonel, eksiksiz ve çözüm odaklı olsun.
+- Terminal ekranındasın: kod blokları (```dil), listeler, markdown ve açıklayıcı teknik detaylar KULLANABİLİRSİN. Kodları tam ve eksiksiz yaz.
+- Özel bir sistem veya masaüstü işlemi yapman gerektiğinde yanıtında araç JSON'unu kullanabilirsin:
+  {{"tool": "arac_adi", "args": {{...}}}}"""
 
-SYSTEM_TEMPLATE = """Sen {name}'sun. Kullanıcının CachyOS (Arch Linux, KDE Plasma, Wayland) bilgisayarında çalışan yapay zeka asistanısın. Bugün {date}.
+SYSTEM_TEMPLATE = """Sen {name}'sun. Kullanıcının {os_info} bilgisayarında tam yetkiye sahip yapay zeka asistanısın. Bugün {date}.
 
 {rules}
 
 ARAÇLAR:
 {tools}
 
-Not:
-- "Spotify'dan/Spotify'da şu şarkıyı çal" gibi isteklerde play_spotify kullan.
-- "YouTube'dan çal" veya genel video isteklerinde play_youtube, "araştır/ara" isteklerinde web_search kullan.
-- "Ekranımda ne var", "ekrandaki hatayı açıkla", "bu pencereyi/kodu incele" gibi isteklerde analyze_screen kullan.
-- Sisteme tam erişimin var: diğer araçların kapsamadığı her türlü dosya, klasör, paket, pencere veya sistem işleminde shell aracını kullan.
+Rehber:
+- Spotify'dan müzik çalmak için play_spotify, YouTube için play_youtube, internet aramaları için web_search kullan.
+- Ekrandaki pencereleri, kodları veya hata pencerelerini incelemek için analyze_screen kullan.
+- Sistemdeki her türlü dosya, paket, servis, terminal veya masaüstü işlemi için tam yetkilisin; shell aracını kullanabilirsin.
 """
 
 
@@ -106,6 +127,7 @@ class Agent:
         rules = VOICE_RULES if is_voice else TEXT_RULES
         base = SYSTEM_TEMPLATE.format(
             name=self.s.name,
+            os_info=_detect_os_info(),
             date=datetime.now().strftime("%d.%m.%Y %H:%M"),
             rules=rules,
             tools=tools.spec_text(),
